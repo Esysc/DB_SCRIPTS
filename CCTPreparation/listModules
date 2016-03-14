@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# list all modules contained in a release
+# return modules paths
+
+
+
+RELEASE=$1
+MODULEPATTERN="NSE NGE NOE NSM"
+
+FIND=$(which find)
+OPTIONS="-maxdepth 2 -type d -name "
+# try to find
+RES=''
+for MOD in $MODULEPATTERN
+do
+    RES="$RES $($FIND $RELEASE $OPTIONS *$MOD*)"
+  
+done
+
+echo $RES

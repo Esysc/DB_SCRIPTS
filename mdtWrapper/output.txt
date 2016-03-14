@@ -1,0 +1,5 @@
+
+In mdtWrapper_1.7 line 720:
+ACTION=$(echo "$confnetContent" > $confnetFile)
+       ^-- SC2116: Useless echo? Instead of 'cmd $(echo foo)', just use 'cmd foo'.
+

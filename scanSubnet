@@ -1,0 +1,253 @@
+#!/bin/bash 
+#Scan the dhcp/bootp subnet to find active clients
+
+switch_maps="
+rack2   192.168.1.202
+rack3   192.168.1.203
+rack4   192.168.1.204
+rack5   192.168.1.205
+rack6   192.168.1.206
+rack7   192.168.1.207
+rack8   192.168.1.208
+rack9   192.168.1.209
+rack10  192.168.1.210
+rack11  192.168.1.211
+rack12  192.168.1.212
+rack13  192.168.1.213
+rack14  192.168.1.214
+rack15  192.168.1.215
+rack16  192.168.1.216
+rack17  192.168.1.217
+rack18  192.168.1.218
+rack19  192.168.1.219
+rack20  192.168.1.220
+rack21  192.168.1.221
+rack22  192.168.1.222
+rack23  192.168.1.223
+rack24  192.168.1.224
+
+
+
+
+shelfA 11
+shelfB 12
+shelfC 13
+shelfD 14
+shelfE 15
+shelfF 16
+shelfG 17
+
+shelf2A 8
+shelf2B 9
+shelf2C 10
+shelf2D 11
+shelf2E 12
+shelf2F 13
+shelf2G 14
+"
+
+
+mapIpRack () {
+
+ip=$1
+# end of data collection
+
+# begin of switch_maps parsing
+
+switch_ip=$(echo "$switch_maps" | awk  '{print $2}' | head -23)
+
+# this needed to map switch 2 as it is different from the others
+#       if [[ "$switch" == "rack2" ]] ; then floor=`echo $floor | sed 's/...../&2/g;s/2$//'` ; fi
+# end switch map parsing
+# find the macs connected:
+
+results=''
+for i in $switch_ip; do
+switch_name=$(echo "$switch_maps" | head -23 | grep -w $i  | awk  '{print $1}')
+client_mac=$(perl /usr/sbin/switchlabel.pl $i public | awk '{print $2}' )
+
+# transform lowercase for arp output
+client_mac=`echo "${client_mac,,}"`
+
+#echo $client_mac
+# find the ip for the client
+                                for b in $client_mac; do
+                ip_client=`arp -n | grep -w "$b" | awk '{print $1}'`
+                        if [[ "$ip_client" == "$ip" ]]; then
+                        MAC=`echo "${b^^}"`
+                        port_number=$(perl /usr/sbin/switchlabel.pl $i public | grep $MAC | awk '{print $6}' )
+                        if [[ "$switch_name" != "rack2" ]]; then
+                        shelf_name=$(echo "$switch_maps" | tail -18 | head -9 | grep   $port_number  | awk  '{print $1}')
+                        log INFO   "$switch_name $shelf_name $ip_client"
+			results="$results <br /> $ip_client => $switch_name $shelf_name"
+                        else
+                        shelf_name=$(echo "$switch_maps" | tail -9 | grep   $port_number  | awk  '{print $1}')
+                        shelf_name=$(echo $shelf_name | sed 's/2//g')
+                        log INFO  "$switch_name $shelf_name $ip_client"
+			results="$results <br /> $ip_client => $switch_name $shelf_name"
+                        fi
+                        break;
+                        fi
+done
+done
+echo $results
+}
+
+#function to update db infos on racks
+writeInDb () {
+timestamps=$(date '+%F %T')
+REST='{"salesorder":"'"$TYPE"'","status":"OK","data":"'"$sendDB"'","creator":"1","message":"'"$HOSTS"'","timestamps":"'"$timestamps"'","dwprocessed":"1"}'
+uri="http://x.x.x.204/SPOT/provisioning/api/tempdata/$TYPE"
+(
+perl - "$REST"  "$uri" <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $REST = shift;
+my $uri = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'PUT', "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+print Dumper $resp;
+_HERE_
+)  2>&1 >/dev/null   
+
+
+}
+
+
+
+log() {
+local level=${1?}
+shift
+local code= line="[$(date '+%F %T')] $level: $*"
+if [ -t 2 ]
+then
+case "$level" in
+INFO) code=36 ;;
+DEBUG) code=30 ;;
+WARN) code=33 ;;
+ERROR) code=31 ;;
+*) code=37 ;;
+esac
+echo -e "\e[${code}m${line}\e[0m"
+else
+echo "$line"
+fi >&2
+
+                                REST='{"title":"scanSubnet ","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
+                                (
+perl - "$REST"   <<'_HERE_'
+                                 use integer;
+                                 use POSIX qw(strftime);
+                                 use Backticks;
+                                 use Data::Dumper;
+                                 use Sys::Hostname;
+                                 use Socket;
+                                 use LWP::UserAgent;
+                                 use LWP::Simple;
+                                 use strict;
+                                 use warnings;
+                                 use integer;
+                                 use Switch;
+                                 use JSON ;
+                                 use feature qw(switch);
+                                 use HTTP::Cookies;
+                                 use HTTP::Request;
+                                 use LWP;
+                                 use File::Path qw{mkpath};
+                                 my $uri = "http://x.x.x.204/SPOT/provisioning/api/events";
+                                 my $REST = shift;
+                                 my $lwp = LWP::UserAgent->new(
+                                                 timeout               => 10,
+                                                 );
+                                 my $req = HTTP::Request->new( 'POST', "$uri" );
+                                 $req->content($REST);
+                                 my $resp = $lwp->request($req);
+                                 print $req->as_string;
+_HERE_
+                                 ) 2>&1 >/dev/null 
+
+}
+# DHCPD LIST
+TYPE='DHCPMAP'
+sendDB='<b>'
+log INFO "Scanning the DHCP subnet 10.0.129.1-100"
+HOSTLIST=$( nmap -v -sT -p22 10.0.129.1-100 2>/dev/null | grep -e '22\/' |sed 's/Host:.//;s/.(.*//'|sort -u | awk '{print $6}')
+log INFO "Results: $HOSTLIST"
+HOSTS='<b>'
+JSON='{'
+counter=1
+if [ $? -eq 0 ]; then
+for HOST in $HOSTLIST
+do
+JSON=$JSON'"Client'$counter'":"'$HOST'"'
+result=$(mapIpRack $HOST)
+sendDB="$sendDB $result"
+HOSTS="$HOSTS Client$counter $HOST <br />"
+((counter++))
+done
+sendDB="$sendDB </b>"
+HOSTS="$HOSTS </b>"
+writeInDb 
+JSON=$JSON"}"
+JSON=$(echo  ${JSON//\"\"/\",\"})
+log INFO "JSON string: $JSON"
+else
+log ERROR "An error occured"
+exit 1
+fi
+
+# BOOTP LIST
+TYPE='BOOTPMAP'
+sendDB='<b>'
+log INFO "Scanning the BOOTP  subnet 192.168.10.3-247"
+HOSTLIST=$( nmap -v -sT -p514 192.168.10.3-247 2>/dev/null | grep -e '514\/' |sed 's/Host:.//;s/.(.*//'|sort -u | awk '{print $6}')
+log INFO "Results: $HOSTLIST"
+HOSTS='<b>'
+JSON='{'
+counter=1
+if [ $? -eq 0 ]; then
+for HOST in $HOSTLIST
+do
+JSON=$JSON'"Client'$counter'":"'$HOST'"'
+result=$(mapIpRack $HOST)
+sendDB="$sendDB $result"
+HOSTS="$HOSTS Client$counter $HOST <br />"
+((counter++))
+done
+sendDB="$sendDB </b>"
+HOSTS="$HOSTS </b>"
+writeInDb 
+JSON=$JSON"}"
+JSON=$(echo  ${JSON//\"\"/\",\"})
+log INFO "JSON string: $JSON"
+else
+log ERROR "An error occured"
+exit 1
+fi
+
+
+
+
+
+

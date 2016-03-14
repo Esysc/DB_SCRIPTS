@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# find path of given release
+# return release path if found
+# return nothing if cannot find
+
+
+
+RELEASE=$1
+PACKAGER="/packager/delivery/Customers"
+FIND=$(which find)
+OPTIONS="-mindepth 1 -maxdepth 2 -type d -name "
+# try to find
+RES=$($FIND $PACKAGER $OPTIONS $RELEASE)
+
+ACR=$(echo $RES | cut -d "/" -f 5)
+
+echo $RES
+

@@ -1,0 +1,1717 @@
+#!/usr/bin/ksh  
+#title          :nimWrapper
+#description    :Boot a POWER server and configure SMS to boot from network.
+#		Start server nim to install nim client 
+#		Require serial cyclades connection.
+#author         :ACS
+#date           :20151203
+#version        :2.0
+#usage          :./nimWrapper
+#notes          :
+#ksh_version    :Version M-11/16/88f
+#============================================================================
+
+
+typeset APISERVER="spmgt.my.comp.ltd"
+typeset EXPECT="/usr/bin/expect"
+typeset scriptName="$0"
+typeset LSNIM=$(which lsnim)
+typeset expectserver="spmgt.my.comp.ltd"
+
+#Determine the nim ip address (in the case we have more than one nim)
+#this value is than use to set SMS nim server value to boot of
+NIMNET=$($LSNIM -l Network1 | grep net_addr | awk  -F "=" '{print $2}' | cut -c 1-8)
+nimserver=$(ifconfig -a | grep $NIMNET | cut -d\  -f2)
+nimnetmask="255.255.255.0"
+
+
+nocheck=0
+#Set nim hosts file for clients
+TIMEZONEALLOWED="
+UT0
+BST11
+HST10
+AST9
+PST8
+MST7
+CST6
+EST5
+AST4
+AST3:30
+GRNLNDST3
+FALKST2
+AZOREST1
+GMT0
+NFT-1
+MEST-2
+WET-2
+USAST-2
+SAUST-3
+MSK-3
+EAT-3
+IRDT-3:30
+WST-4
+AFT-4:30
+PAKST-5
+IST-5:30
+NPT-5:45
+NOVST-6
+MMT-6:30
+THAIST-7
+BEIST-8
+ULAT-8
+WAUST-8
+TAIST-8
+JST-9
+KORST-9
+CST-9:30
+EET-10
+VLAT-10
+MET-11
+NZST-12
+"
+
+# Gets the cyclades and swithes values from DB
+getEnv() {
+
+Rack=$(echo $nimclient | awk -F "_" '{print $1}')
+Shelf=$(echo $nimclient | awk -F "_" '{print $2}')
+Rack=$(echo $Rack | sed 's/[^0-9]//g')
+#Rack=$(echo  "${Rack##${Rack%%?}}")
+Shelf=${Shelf##${Shelf%%?}}
+
+
+#check that values are not empty
+if [ $Rack != "" ] and [ $Shelf != "" ]; then
+log INFO "About to download env values from http://x.x.x.204/SPOT/provisioning/api/sysprodracksmappings?Rack_Equals=$Rack&Shelf_Equals=$Shelf"
+
+URI="http://$APISERVER/SPOT/provisioning/api/sysprodracksmappings?Rack_Equals=$Rack&Shelf_Equals=$Shelf"
+results=$(
+perl - "$URI"  <<'_HERE_'
+use Time::Piece;
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+
+my $WEB = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'GET', "$WEB" );
+my $resp = $lwp->request($req);
+my $decoded = decode_json($resp->content);
+#my %recursive = ( $decoded->{rows} );
+#print $req->as_string;
+#print Dumper $resp;
+#print Dumper $decoded->{rows}->[0]->{switchip};
+my $switchip = $decoded->{rows}->[0]->{switchip};
+my $bootpip = $decoded->{rows}->[0]->{bootpip};
+my $cycladesip = $decoded->{rows}->[0]->{cycladesip};
+my $cycladesport = $decoded->{rows}->[0]->{cycladesport};
+my $switchport = $decoded->{rows}->[0]->{switchport};
+my $rack = $decoded->{rows}->[0]->{rack};
+my $shelf = $decoded->{rows}->[0]->{shelf};
+print "$switchip\n$bootpip\n$cycladesip\n$cycladesport\n$switchport\n$rack\n$shelf\n";
+_HERE_
+)
+	counter=1
+	for i in $results
+	do
+	case $counter in
+		1) switchip=$i;;
+		2) bootpip=$i;;
+		3) cycladesip=$i;;
+		4) cycladesport=$i;;
+		5) switchport=$i;;
+		6) rack=$i;;
+		7) shelf=$i;;
+	esac
+	counter=$((counter + 1))
+	done
+	#Prepare the string for parsing
+
+	NIMHOSTS="$bootpip rack"$rack"_shelf$shelf"
+
+	CYCLADES="rack"$rack"_shelf$shelf $cycladesip:$cycladesport"
+	case $Rack in
+	2) switch_maps="rack$rack $switchip
+	shelf$rack$shelf $switchport"
+	;;
+	*) switch_maps="rack$rack $switchip
+	shelf$shelf $switchport"
+	;;
+	esac
+
+	log INFO "The env values for cyclades are $CYCLADES and for switches $switch_maps"
+
+else
+	log ERROR "The nim client $nimclient is not valid"
+	exit 1
+fi
+
+}
+
+
+
+# Usage function
+usage () {
+log INFO "
+usage $0 
+-a [aixtz]  
+-c [nimclient] 
+-d [disksize(GB)] 
+-g [default gateway] 
+-h [hostname] 
+-i [image name] 
+-ip [ip address] 
+-m [mirror:0|1] 
+-n [netmask] 
+-p [paging size] 
+-s [sales order number]
+-boot [normal|factory (default to not initiate boot)]
+-nocheck (without values args.) If you don't want to check for nimclient validity for ex. to install LPAR that physically are not placed on a rack shelf
+"
+log INFO "Only 3 parameters are mandatory: -a [aixtz] -c [nimclient] -i [image name]"
+log WARN "If only the [-c nimclient] parameter is given, the script check if the connection is ok"
+log WARN "To boot in diag or maintenance mode, only three parameters are needed: -c nimclient -i [diag|maint_boot] -spot [spot name]. note that if -spot is empty, it will return a list of possible object"
+
+exit 0
+
+}
+
+# Checks if the mandatory arguments are all here
+check_args() {
+#put here the mandatory params
+([[ -z "$image" ]] || [[ -z "$aixtz"  ]] || [[ -z "$nimclient"  ]] ) && nimclient="usage" && log ERROR "Some mandatory parametrs missing!!!!!" && log INFO "Type $0 without arguments to grab usage." && exit 1
+ valid_ip $ipaddress && [ "$ERROR" -ne 0 ] && log ERROR "Ip address not valid" && exit 1
+ valid_ip $netmask && [ "$ERROR" -ne 0 ] && log ERROR "Netmask not valid" && exit 1
+ valid_ip $gateway && [ "$ERROR" -ne 0 ] && log ERROR "Gateway not valid" && exit 1
+ [[ ! -z "$bootClient" ]] && ! [[   "$bootClient" == "normal" ||  "$bootClient"  == "factory" ]] &&
+ log ERROR "You put a wrong param ($bootClient) on -boot option. You can omit it or set to 'factory' or 'normal'"  && exit 1
+ ! lsnim -c machines | grep $nimclient && log ERROR "Hey, this client doesn't exists on nim...! check your spelling" && exit 1
+ ERROR=1
+ for time in $TIMEZONEALLOWED
+ do
+ if [[ "$aixtz" == ${time}* ]]; then
+ ERROR=0
+ break
+ fi
+ done
+#Force the TZ right
+ERROR=0
+ [ $ERROR -eq 1 ] && log ERROR "The timezone you defined $aixtz is not in valid range. Please note the DST validation is not performed yet" && log WARN "valid values ranges are $TIMEZONEALLOWED" && exit 1
+ log INFO "GOOD! the time zone you defined, '$aixtz' apperently is correct.  Please note the DST validation is not performed yet."
+
+ # Check if the image exists and is defined
+IMAGES=$(lsnim -t mksysb)
+echo $IMAGES | grep -w "$image"  >/dev/null 2>&1 
+ [  $? -eq 1 ] && log ERROR "The mksysb image '$image' was not found on NIM. Please check the name you typed. Available images are: \n$IMAGES" && exit 1
+}
+
+
+#Log function
+
+
+log() {
+level=${1?}
+shift
+line="[$(date '+%F %T')] $level: $*"
+if [ -t 2 ]
+then
+case "$level" in
+INFO) code=32 ;;
+DEBUG) code=35 ;;
+WARN) code=33 ;;
+ERROR) code=31 ;;
+*) code=0 ;;
+esac
+echo "\033[${code}m${line}\033[0m"
+else
+echo "$line"
+fi >&2
+
+
+
+#LOG to web services
+#Create one section for each web service
+URI="http://$APISERVER/SPOT/provisioning/api/events"
+REST='{"title":"nimWrapper | '$nimclient'","content":"'$line'","userid":"'$(whoami)'","date":"'$(date)'"}'
+(
+perl - "$URI" "$REST"  <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $uri = shift;
+my $REST = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'POST', "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+exit;
+_HERE_
+)  >/dev/null 2>&1  
+
+if [[ ! -z $salesOrder && ! -z $nimclient ]]; then
+PK="["$salesOrder"]["$nimclient"]"
+URI="http://$APISERVER/SPOT/provisioning/api/provisioningnotifications/$PK"
+        REST="{
+        \"notifid\":\"$PK\",
+        \"hostname\":\"$hostname\",
+        \"installationip\":\"<a href='$CYCLADES' target='_blank'>cyclades://$BOOTIP</a>\",
+        \"configuredip\":\"$ipaddress\",
+        \"status\":\"<b>$line</b>\",
+        \"progress\":\"$PROGRESS\",
+        \"image\":\"$image\",
+        \"firmware\":\"IBM OpenFirmware\",
+        \"ram\":\"N/D\",
+        \"cpu\":\"N/D\",
+        \"diskscount\":\"N/D\",
+        \"netintcount\":\"N/D\",
+        \"model\":\"N/D\",
+        \"serial\":\"N/D\",
+        \"os\":\"$SPOT\"
+        }"
+
+        # Write monitoring infos to web service
+SEND  >/dev/null 2>&1
+
+fi
+
+}
+
+SEND () {
+
+
+perl -e '
+use integer;
+use POSIX qw(strftime);
+use Data::Dumper;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+my $REST = shift;
+my $uri = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( "PUT", "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+exit;
+' "$REST" "$URI"
+
+
+}
+
+
+# check IP address function
+valid_ip() {
+ERROR=0
+    if [[ ! "$1" == "" ]]; then
+    oldIFS=$IFS
+    IFS=.
+    set -f
+    set -- $1
+    if [ $# -eq 4 ]
+    then
+      for seg
+      do
+        case $seg in
+            ""|*[!0-9]*) ERROR=1;break ;; ## Segment empty or non-numeric char
+            *) [ $seg -gt 255 ] && ERROR=2 ;;
+        esac
+      done
+    else
+      ERROR=3 ## Not 4 segments
+    fi
+    IFS=$oldIFS
+    set +f
+    fi
+    return ERROR
+}
+
+sshExe() {
+# $1 client ip
+#
+# $2 command or function
+# No password required because we run on drbl server
+ ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t root@$1 " $2"
+if [[ $? -ne 0 ]]
+then
+log ERROR "Cannot ssh to $1, every further action will be not possible so I exit right now!"
+fi
+}
+
+#Power on, set bootip ip address on client and start network for install
+
+powerOnAndInstall () {
+line=$(echo  "$CYCLADES" | grep $nimclient | awk '{print $2}')
+address=$(echo $line | awk -F ":" '{print $1}')
+port=$(echo $line | awk -F ":" '{print $2}')
+bootip=$(echo  "$NIMHOSTS" | grep $nimclient | awk '{print $1}')
+case "$bootClient" in
+        "normal" )
+asmiPowerOn='
+expect "assword: " { send admin\n }
+expect " 80]: "    { send \n }
+expect " 24]: "    { send \n }
+'
+acceptLicense=''
+                 ;;
+        "factory" )
+asmiPowerOn='
+expect "assword: " { send admin\n }
+expect " change: " { send admin\n }
+expect " ID admin: "  { send admin\n }
+expect " for user: " { send admin\n }
+expect " again: " { send admin\n }
+expect " CONTINUE:" { send \n }
+expect " 80]: "    { send \n }
+expect " 24]: "    { send \n }
+'
+acceptLicense='
+expect {
+" Enter:"
+{
+send -s -- "2\r"
+}
+}
+expect  " Enter:"
+sleep .1
+send -s -- "1\r"
+'
+                  ;;
+                *)
+                break
+                ;;
+esac
+log INFO "About to power ON the server and set SMS to boot on network...... "
+sshExe $expectserver /usr/bin/expect -c <<EXPECT
+set send_slow {1 .1}
+catch {spawn -noecho telnet $address $port}
+set timeout 10
+expect {
+" DEVICE LOCKED" { puts "*********locked\\n"; close; exit }
+"onnected" {
+puts "login to Hypervisor\\n";
+send \\n;
+}
+"ogin: " {
+puts "**** already active\\n exiting\\n"; close; exit;
+}
+}
+send \\n
+expect {
+default     { send \\n; exp_continue }
+"out."      { send "~."; exp_continue }
+"User ID: " { send admin\\n }
+"ogin: " {
+puts "**** already active\\n exiting\\n"; close; exit;
+}
+}
+$asmiPowerOn
+#Continue normal way
+expect "S1> "      { send 1\\n; sleep 1 }
+expect "S1> "      { send 2\\n; sleep 1 }
+expect "S1> "      { send 2\\n; sleep 1 }
+expect "S1> "      { send 1\\n; sleep 1 }
+expect "S1> "      { send 8\\n; sleep 1 }
+expect "CONTINUE: " { send \\n; sleep 1 }
+expect "S1> "      { send 99\\n; sleep 1 }
+expect "out. \\n"      { send "~." }
+expect "~."        { send "\\n" }
+puts "\\n\\nPower On Successful\\n"; 
+puts "\\n\\nWaiting for SMS menu\\n";
+set timeout -1
+puts "\\n\\nSleeping for 120 seconds (about 2 minutes)\\n";
+sleep 120
+puts "\\n\\nI'm getting up now,  spawning sms commands...\\n";
+send  \\r
+send  \\r
+send  \\r
+$acceptLicense
+expect -exact "     Memory      Keyboard     "
+sleep .1
+send -s -- "1"
+expect -exact "Network     SCSI     "
+sleep .1
+send -s -- "1"
+expect -exact " Type menu item number and press Enter:"
+sleep .1
+send -s -- "2\\r"
+expect -exact ""
+sleep .1
+send -s -- "a"
+expect -exact "*"
+sleep .1
+send -s -- "d"
+expect -exact "*"
+sleep .1
+send -s -- "m"
+expect -exact "*"
+sleep .1
+send -s -- "i"
+expect -exact "*"
+sleep .1
+send -s -- "n"
+expect -exact "*"
+sleep .1
+send -s -- "\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "5\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "2\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "1\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "6\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "1\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "2\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "2\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "m"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "2\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "2\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "1\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "1\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "1\\r"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "1\\r"
+expect -exact " X to Abort or Enter Client IP Address: "
+sleep .1
+send -s -- $bootip\\r
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "2\\r"
+expect -exact " X to Abort or Enter Server IP Address: "
+sleep .1
+send -s -- $nimserver\\r
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "4\\r"
+expect -exact " X to Abort or Enter Subnet Mask: "
+sleep .1
+send -s -- $nimnetmask\\r
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "x"
+expect -exact " Type menu item number and press Enter or select Navigation key:"
+sleep .1
+send -s -- "1\\r"
+puts "\\n\\nSuccess! the server is booting now...\\n";
+sleep 240
+send "\\035"
+expect "elnet> "    { send quit\\n }
+expect eof
+EXPECT
+log INFO "The server should be powered on and trying to boot from network...."
+}
+
+# Boot in maintenance or diag mode
+
+bootSpecial () {
+
+#Reset before to allocate
+log INFO "Resetting resources before to allocate"
+nim -F -o reset $nimclient
+nim -o deallocate -a subclass=all $nimclient
+
+
+log INFO "Launching the job $image for $nimclient"
+nim -o $image -a spot=$spot $nimclient
+if [ $? -eq 0 ]
+then
+log INFO "Successfully scheduled the job $image for $nimclient"
+exit  0
+else
+log ERROR "Something goes wrong running nim -o $image -a spot=$spot $nimclient"
+exit 1
+fi
+
+}
+
+#check if nim client exists
+
+checkClient () {
+
+( ! lsnim -c machines | grep $nimclient  && log ERROR "Hey, this client doesn't exists on nim...! check your spelling" && exit 1 ) || log INFO "Good! the client nim is valid"
+
+}
+
+#check if something is connected on
+
+
+checkRack () {
+# exit 144 => no connection
+# exit 145 => asmi presents
+checkClient
+if [ $? -eq 1 ];then
+exit 1
+fi
+echo "nocheck $nocheck"
+if [ $nocheck -eq 0 ];  then
+echo $CYCLADES
+line=$(echo  "$CYCLADES" | grep $nimclient | awk '{print $2}')
+address=$(echo $line | awk -F ":" '{print $1}')
+port=$(echo $line | awk -F ":" '{print $2}')
+log INFO "Checking if IBM machine is connected on $nimclient"
+/usr/local/bin/expect 2>&1 >/dev/null <<EXP
+set send_slow {1 .1}
+catch {spawn -noecho telnet $address $port}
+set timeout 2
+#Default value is 300
+set sig 400
+expect {
+         " DEVICE LOCKED" { puts "*********locked"; set sig 400}
+         "onnected" {
+                 send \n;
+                 }
+         "ogin: " {
+                 puts "**** already active exiting";set sig 400;
+                 }
+         }
+         send \n;
+         expect {
+                "out."      {
+                            puts "The server is connected"; set sig 401 }
+                "User ID: " { puts "The server is connected"; set sig 401 }
+                "ogin: " {
+                 puts "**** already active exiting"; set sig 401;
+                 }
+                "S1> " { puts "The server is connected"; send 99\n; set sig 401 }
+                }
+puts "exit signal is \$sig"
+#send_error "\$sig"
+exit \$sig
+close
+expect eof
+EXP
+RET=$?
+[[ $RET -eq 144 ]] && log WARN "I can't detected a IBM client on $nimclient . Check if the telnet connection is not owned by something else"
+[[ $RET -eq 145 ]] && log INFO "Good! A IBM client has been detected"
+#echo $RET
+fi
+}
+
+
+check_spot () {
+#find the spot associated
+log INFO "Finding the associated SPOT to $image image"
+os_level_img=$(lsnim -l $image | grep oslevel_r | awk -F "=" '{print $2}' | awk -F "-"  '{print $1}')
+mod_img=$(lsnim -l $image | grep mod | awk -F "=" '{print $2}')
+extr_spot_img=$(lsnim -l $image | grep extracted_spot | awk -F "=" '{print $2}')
+if [ ! $extr_spot_img == '' ]; then
+out=$extr_spot_img
+
+log INFO "SPOT $out found"
+return 0
+else
+spots=$(lsnim -t spot | awk '{print $1}')
+for i in $spots ; do
+os_level_spot=$(lsnim -l $i | grep oslevel_r | awk -F "=" '{print $2}' | awk -F "-"  '{print $1}')
+if [[ $os_level_img == $os_level_spot  ]] ; then
+out=$i" "$out
+fi
+done
+fi
+for i in $out; do
+mod_spot=$(lsnim -l $i | grep mod | awk -F "=" '{print $2}')
+if [[ $mod_spot -gt $mod_img ]] ; then
+out=$i
+log INFO "SPOT $out found"
+return 0 
+fi
+done
+for i in $out; do
+mod_spot=$(lsnim -l $i | grep mod | awk -F "=" '{print $2}')
+if [[ $mod_spot == $mod_img  ]] ; then
+out=$i
+log INFO "SPOT $out found"
+return 0
+fi
+done
+
+
+out='SPOT need to be created!!!!!\n'
+log WARN "$out"
+spot="SPOT_"$image
+log INFO "Creating spot $spot from $image image"
+nim -o define -t spot -a server=master -a location=/data/backup/SPOT/mksysb -a source=$image -a installp_flags=-aQg $spot || exit 1
+out=$spot
+log INFO "End create spot $spot"
+}
+if [ $# -eq 0 ]; then
+usage
+fi
+
+# There some case where the arguments may be different (checkRack and bootSpecial functions)
+if [ $# -eq 2 ]; then
+	nimclient=$2
+	checkRack
+	exit $RET
+fi
+# Check if settings are for diag or maintenance mode
+if [ $# -le 7 ]; then
+	while :
+	do
+    		case "$1" in
+		-c )
+		 nimclient="$2"
+		 shift 2
+		 ;;
+		-i )
+		image="$2"
+		shift 2
+		;;
+		-spot )
+		spot=$2
+		shift 2
+		;;
+		-nocheck )
+		nocheck=1
+		shift 1
+		;;
+		*)
+		break
+		;;
+		esac
+	done
+SPOTS=$(lsnim -t spot | awk '{print $1}')
+for i in $SPOTS
+	do
+	if [[ "$i" == "$spot" ]]; then
+		break
+	fi
+done
+[[ "$i" != "$spot" ]] && log ERROR " Spot choiche is mandatory, you can choose between the following ones:  \n$SPOTS" && exit 1
+[[  "$image" != "maint_boot" ]] && [[ "$image" != "diag" ]] && log ERROR "The tasks must named either 'diag' or 'maint_boot'" && exit 1
+if [ $nocheck -eq 0 ]; then
+	checkRack
+	if [ $RET -eq 144 ]; then
+		exit $RET
+	fi
+fi
+bootSpecial
+exit $?
+fi
+#Actually Get the arguments
+
+while :
+do
+    case "$1" in
+	-a )
+	  aixtz="$2" # You may want to check validity of $2
+	  shift 2
+	  ;;
+	   -c )
+	  nimclient="$2"   # You may want to check validity of $2
+	  shift 2
+	  ;;
+	  -d )
+	  disk="$2" # You may want to check validity of $2
+	  shift 2
+	  ;;
+	  -g )
+	  gateway="$2"   # You may want to check validity of $2
+	  shift 2
+	  ;;
+      -h )
+	  hostname="$2"   # You may want to check validity of $2
+	  shift 2
+	  ;;
+      -i )
+	  image="$2"  
+	  shift 2
+	  ;;
+	  -ip )
+	  ipaddress="$2"  
+	  shift 2
+	  ;;
+	  -m )
+	  mirror="$2"  
+	  shift 2
+	  ;;
+      -n )
+	  netmask="$2" # You may want to check validity of $2
+	  shift 2
+	  ;;
+      -p )
+	  paging="$2" # You may want to check validity of $2
+	  shift 2
+	  ;;
+	  -s )
+	  salesOrder="$2" # You may want to check validity of $2
+	  shift 2
+	  ;;
+     -boot )
+	  bootClient=$2 
+	  shift 2
+	  ;;
+     -nocheck )
+	nocheck=1
+	shift 1
+        ;;
+*)	break
+;;
+	   esac
+done
+
+
+# Before to check validity of arguments, we check for special jobs
+
+
+#Gets the environmental values
+
+getEnv
+
+# check the arguments
+# Please note that data is not verified
+check_args
+if [ $nocheck -eq 0 ]; then
+        checkRack
+        if [ $RET -eq 144 ]; then
+                exit $RET
+        fi
+fi
+
+
+# Check The existence of related spot and obtain the resource name
+# If spot doesn't exist it will be created and if the image name is not correct it will exit 1
+log INFO "Checking if a SPOT exists"
+check_spot
+# Store spot name in SPOT var
+SPOT=$out
+log INFO "Set default values for ones not specified in command line"
+# Set the defaults values
+[[ -z "$paging" ]] && paging=16									&& log INFO "Set paging size to '$paging GB'"
+[[ -z "$disk" ]] && disk=279									&& log INFO "Set disk size to '$disk GB'"
+[[ -z "$salesOrder" ]] && salesOrder="99999999"         					&& log INFO "Set sales order to '$salesOrder'"
+[[ -z "mirror" ]] && mirror="0"									&& log INFO "Set mirror to false"
+[[ -z "$ipaddress" ]] && ipaddress="10.0.133.$((RANDOM%=255))"                          && log INFO "Set the ip address to '$ipaddress'"
+[[ -z "$netmask" ]] && netmask="255.255.255.0"                                                  && log INFO "Set the netmask to '$netmask'"
+[[ -z "$gateway" ]] && gateway="10.0.133.252"                                                   && log INFO "Set the gateway to '$gateway'"
+[[ -z "$hostname" ]] && hostname="cas01"                                                        && log INFO "Set the hostname to '$hostname'"
+
+# generate a random unique suffix
+random=$(date +%s)
+
+# Set the temporary working directory
+
+TMP="/tmp/"
+
+# Set the script file name
+SCRIPTFILE=$TMP$nimclient"_ech"
+SCRIPTFILEBASE=${SCRIPTFILE##*/}
+# Set the NIM client ip address
+
+nim_ip=$(grep $nimclient  /etc/hosts | awk '{print $1}')
+
+# Get current date
+
+DATE=$(date)
+
+# Define variables used by NIM section
+ftp_server=192.168.10.149
+
+
+log INFO "Starting writing postinstall script for client $nimclient"
+# write the header of the post install script and set the ip of en1 to nim client address
+# THis step is to execute a inventory script vi FTP protocol
+	
+cat << EOF > $SCRIPTFILE
+#!/usr/bin/ksh
+#### Write sysprod information in .syp_log file in /home/root directory
+echo "Writing sysprod information in .syp_log file in /home/root directory"
+touch  /home/root/.syp_log
+echo \"Installation number: $salesOrder performed on $DATE hostname: $hostname\" > /home/root/.syp_log
+EOF
+
+cat << 'EOF' >> $SCRIPTFILE
+SEND () {
+
+
+perl -e '
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use JSON ;
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+
+my $REST = shift;
+my $uri = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( "PUT", "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+' "$REST" "$URI"
+
+}
+
+createMonitorRecord () {
+ status="Postinstall Script<br />: $1"
+EOF
+cat << EOF >> $SCRIPTFILE
+ PK="["$salesOrder"]["$nimclient"]"
+ URI="http://$ftp_server/SPOT/provisioning/api/provisioningnotifications/$PK"
+EOF
+cat << 'EOF' >> $SCRIPTFILE
+	REST="{
+         \"status\":\"<b>$status</b>\",
+        \"progress\":\"100\",
+        \"ram\":\"$RAM_tot\",
+        \"cpu\":\"$NUMPROC\",
+        \"netintcount\":\"$NETINTCOUNT\",
+        \"diskscount\":\"SCSI:$SCSI <br />SAS:$SAS\",
+        \"model\":\"$MANUFACTURER\",
+        \"serial\":\"$MACHSERIAL\",
+        \"os\":\"$OSlevel\"
+        }"
+
+        SEND 2>&1 >/dev/null
+}
+EOF
+
+cat << 'EOF' >> $SCRIPTFILE
+createMonitorRecord "Deleting Etherchannels"
+#Deletes etherchannels
+echo "Deleting etherchannels"
+for curr_nic in `/usr/sbin/lsdev -t ibm_ech 2> /dev/null | awk '{ print $1 }'`
+do
+tmp_val=$( echo $curr_nic | sed 's:ent:en:g' )
+/usr/sbin/ifconfig $curr_nic delete > /dev/null 2>&1
+/usr/sbin/ifconfig $tmp_val delete > /dev/null 2>&1
+/usr/sbin/chdev -l $curr_nic -a state=detach > /dev/null 2>&1
+/usr/sbin/chdev -l $tmp_val -a state=detach > /dev/null 2>&1
+/usr/sbin/rmdev -dl $curr_nic -R > /dev/null 2>&1
+/usr/sbin/rmdev -dl $curr_nic > /dev/null 2>&1
+/usr/sbin/rmdev -dl $tmp_val -R > /dev/null 2>&1
+/usr/sbin/rmdev -dl $tmp_val > /dev/null 2>&1
+done
+
+#Deletes adapters
+createMonitorRecord "Deleting adapters"
+echo "Deleteing adapters"
+for curr_nic in `/usr/sbin/lsdev -t en 2> /dev/null | awk '{ print $1 }'`
+do
+/usr/sbin/ifconfig $curr_nic delete > /dev/null 2>&1
+/usr/sbin/chdev -l $curr_nic -a state=detach > /dev/null 2>&1
+/usr/bin/odmdelete -o CuAt -q name="$curr_nic" > /dev/null 2>&1
+done
+### END OF DELETE OBJECTS ###
+
+### DECLARE VARIABLE ###
+
+typeset prim_ada="ent1"
+typeset sec_ada="NONE"
+typeset ech_ada=":ech_name:"
+EOF
+
+cat << EOF >> $SCRIPTFILE
+typeset clt="$nimclient"
+typeset client_ip="$nim_ip"
+typeset netm="255.255.255.0"
+typeset gateway="$ftp_server"
+typeset tmp_val=""
+typeset if_type="direct"
+typeset domain="NONE"
+typeset nameserver="NONE"
+### END OF DECLARE VARIABLE ###
+createMonitorRecord "About to set the ip address"
+### SET IP ADDRESS FORCE ###
+if [ \"\$if_type\" = 'ech' ]
+then
+tmp_val=\$(
+                /usr/sbin/lsdev -Cc if | \
+                awk ' \$1 ~ /^[ \\t]*en[0-9]+\$/ { gsub(/en/, \"\", \$1) ; print \$1 } ' | \\
+                sort
+          )
+tmp_val=\$( echo \$tmp_val | awk ' { print \$NF } ' )
+tmp_val=\"en\${tmp_val}\"
+else
+tmp_val=\$( echo \$prim_ada | sed 's:ent:en:g' )
+fi
+
+[ \"\$netm\" = 'NONE' ] && netm=\"\" || netm=\" -m \\\"\$netm\\\"\"
+[ \"\$nameserver\" = 'NONE' ] && nameserver=\"\" || nameserver=\" -n \\\"\$nameserver\\\"\"
+[ \"\$domain\" = 'NONE' ] && domain=\"\" || domain=\" -d \\\"\$domain\\\"\"
+[ \"\$gateway\" = 'NONE' ] && gateway=\"\" || gateway=\" -g \\\"\$gateway\\\"\"
+
+/usr/sbin/mktcpip -h \"\$clt\" -a \"\$client_ip\" \$netm -i \"\$tmp_val\" \$nameserver \$domain \$gateway -A'no' -t'N/A' -s''
+
+
+
+### END OF SET IP ADDRESS FORCE ###
+
+### SETTING HOST FILE AND RUN INVENTORY VIA FTP###
+createMonitorRecord \"Adjusting the host file to the subnet and run inventory\"
+echo \"$ftp_server pkg_exp\" >> /etc/hosts
+ echo \"launching the ftp command \"
+ mkdir -p /home/operator/delivery ;cd /home/operator/delivery
+ ftp -n pkg_exp <<ftpend
+user sysprod sysprod
+passive
+bin
+cd /var/www/pool/inventory/
+get aix_inventory.sh
+ftpend
+
+chmod a+x aix_inventory.sh
+./aix_inventory.sh | tee -a $salesOrder.$hostname
+rm aix_inventory.sh
+ftp -n pkg_exp <<ftpend
+user sysprod sysprod
+passive
+bin
+cd /var/www/pool/pending/
+put $salesOrder.$hostname
+ftpend
+
+#notify monitoring interface with inv data
+
+EOF
+
+cat >> $SCRIPTFILE <<'EOF'
+MACHARCH=`uname -M`
+### Base System
+MODELTYPE=`echo $MACHARCH | cut -c5-`
+if [ $? -eq 0 ]; then
+        MACHSERIAL=`uname -u | cut -c7-`
+        NUMPROC=`lsdev -Cc processor | wc -l`
+        MANUFACTURER="IBM"
+        MODEL=""
+	NETINTCOUNT=`lsdev -Cc if | grep en | grep -v lo0 | awk '{print $1}' | wc -l`
+        OSlevel=`oslevel`
+        SCSI=`lsdev -Cc disk | grep -vi ssa | wc -l`
+        SAS=`lsdev -Cc pdisk | wc -l`
+        ### Memory
+        dimm_num=`lscfg -vp | grep -E "Memory DIMM" | wc -l`
+        dimm_position=`lscfg -vp | grep -p "Memory DIMM" | grep "Physical" | awk '{print $3}'`
+        dimm_size_each=`lscfg -vp | grep  "Size"  | tr "." " " | awk '{print $2}'`
+        RAM_tot=0
+        for mem in $dimm_size_each
+        do
+                RAM_tot=$(($RAM_tot+$mem))
+        done
+ #       RAM_tot=`expr $RAM_tot / 1024`
+fi
+
+EOF
+
+# SET NETWORKING IF IPADDRESS ARGS IS HERE
+
+
+if [[ ! -z $ipaddress ]] && [[ !  -z $netmask  ]] && [[ ! -z $gateway  ]]
+then
+base_ip=$ipaddress
+
+cat << EOF >> $SCRIPTFILE
+### DECLARE VARIABLE ###
+
+        typeset prim_ada=\"en0\"
+        typeset sec_ada=\"NONE\"
+        typeset ech_ada=\":ech_name:\"
+        typeset clt=\"$hostname\"
+        typeset client_ip=\"$base_ip\"
+        typeset netm=\"$netmask\"
+        typeset gateway=\"$gateway\"
+        typeset tmp_val=\"\"
+        typeset if_type=\"direct\"
+        typeset domain=\"NONE\"
+        typeset nameserver=\"NONE\"
+### END OF DECLARE VARIABLE ###
+### SET IP ADDRESS FORCE ###
+        if [ \"\$if_type\" = 'ech' ]
+        then
+        tmp_val=\$(
+                        /usr/sbin/lsdev -Cc if | \
+                        awk ' \$1 ~ /^[ \\t]*en[0-9]+\$/ { gsub(/en/, \"\", \$1) ; print \$1 } ' | \\
+                        sort
+                  )
+        tmp_val=\$( echo \$tmp_val | awk ' { print \$NF } ' )
+        tmp_val=\"en\${tmp_val}\"
+        else
+        tmp_val=\$( echo \$prim_ada | sed 's:ent:en:g' )
+        fi
+
+        [ \"\$netm\" = 'NONE' ] && netm=\"\" || netm=\" -m \\\"\$netm\\\"\"
+        [ \"\$nameserver\" = 'NONE' ] && nameserver=\"\" || nameserver=\" -n \\\"\$nameserver\\\"\"
+        [ \"\$domain\" = 'NONE' ] && domain=\"\" || domain=\" -d \\\"\$domain\\\"\"
+        [ \"\$gateway\" = 'NONE' ] && gateway=\"\" || gateway=\" -g \\\"\$gateway\\\"\"
+
+        /usr/sbin/mktcpip -h \"\$clt\" -a \"\$client_ip\" \$netm -i \"\$tmp_val\" \$nameserver \$domain \$gateway -A'no' -t'N/A' -s''
+
+        [ -x \"/etc/rc.d/init.d/firstboot\" ] && \\
+                /etc/rc.d/init.d/firstboot
+
+### END OF SET IP ADDRESS FORCE ###
+### UPDATE HOSTS FILE ####
+createMonitorRecord \"Updating Hosts file ...\"
+EOF
+pattern=$(echo $base_ip | awk -F "." '{print $1"."$2"."$3}')
+cat << EOF >> $SCRIPTFILE
+sed 's/10.0.129/'$pattern'/g' /etc/hosts > /tmp/hosts
+mv /tmp/hosts /etc/hosts
+EOF
+fi
+
+## NOW START THE SECOND PART OF POSTINSTALL SCRIPT
+
+
+
+
+
+if [  ! -z $mirror ];
+		then     
+
+cat << EOF >> $SCRIPTFILE
+### MIRROR VG SECTION ###
+createMonitorRecord \"Applying mirrorVG\"
+typeset disk_list=\"hdisk0 hdisk1\"
+[ \"\$#\" -ne 0 ] && disk_list=\"\$@\"
+
+typeset booted_disk=\"\"
+typeset other_disk=\"\"
+typeset pri_dmp=\"\"
+typeset sec_dmp=\"\"
+typeset tmp_val=\"\"
+
+echo \"Mirroring rootvg\"
+
+booted_disk=\$( /usr/sbin/bootinfo -b )
+
+for curr_disk in \$disk_list
+do
+  [ \"\$curr_disk\" = \"\$booted_disk\" ] && continue
+  other_disk=\"\$curr_disk\"
+done
+
+pri_dmp=\$( /usr/bin/sysdumpdev | \\
+  awk ' \$1 ~ /^[ \\t]*primary[ \\t]*\$/ { print \$2 }' )
+sec_dmp=\$( /usr/bin/sysdumpdev | \\
+  awk ' \$1 ~ /^[ \\t]*secondary[ \\t]*\$/ { print \$2 }' )
+
+/usr/sbin/extendvg -f rootvg \$other_disk > /dev/null 2>&1
+/usr/sbin/mirrorvg -S -m rootvg \$other_disk > /dev/null 2>&1
+if [ \"\$?\" -ne 0 ]
+then
+/usr/sbin/unmirrorvg rootvg \$other_disk > /dev/null 2>&1
+/usr/sbin/reducevg rootvg \$other_disk > /dev/null 2>&1
+  else
+    /usr/sbin/bosboot -a -d /dev/\$booted_disk > /dev/null 2>&1
+    /usr/sbin/bosboot -a -d /dev/\$other_disk > /dev/null 2>&1
+
+    /usr/bin/bootlist -m normal -o \$booted_disk \$other_disk > /dev/null 2>&1
+
+    #Clean dump devices
+    /usr/bin/sysdumpdev -P -s /dev/sysdumpnull > /dev/null 2>&1
+    /usr/bin/sysdumpdev -P -p /dev/sysdumpnull > /dev/null 2>&1
+ tmp_val=\$( echo \$sec_dmp | awk -F\\/ ' { print \$NF } ' )
+    [ ! \"\$tmp_val\" = 'sysdumpnull' ] && /usr/sbin/rmlv -f \$tmp_val > /dev/null 2>&1
+    tmp_val=\$( echo \$pri_dmp | awk -F\\/ ' { print \$NF } ' )
+    [ ! \"\$tmp_val\" = 'sysdumpnull' ] && /usr/sbin/rmlv -f \$tmp_val > /dev/null 2>&1
+
+    #create the dump devices
+    tmp_val=\$( echo \$booted_disk | sed 's:[a-z][a-z]*::g' )
+    /usr/sbin/mklv -a ie -y dumplv_h\${tmp_val} -t sysdump rootvg 4 \$booted_disk > /dev/null 2>&1
+    /usr/bin/sysdumpdev -P -p /dev/dumplv_h\${tmp_val} > /dev/null 2>&1
+
+    tmp_val=\$( echo \$other_disk | sed 's:[a-z][a-z]*::g' )
+    /usr/sbin/mklv -a ie -y dumplv_h\${tmp_val} -t sysdump rootvg 4 \$other_disk > /dev/null 2>&1
+    /usr/bin/sysdumpdev -P -s /dev/dumplv_h\${tmp_val}
+
+    #If there is a reboot, force the rootvg sync.
+    echo \"#! /usr/bin/ksh\" > /home/root/sync_mirr_once
+    echo \"([ -z \"\`/usr/sbin/fuser /usr/sbin/syncvg 2>/dev/null\`\" ] && /usr/sbin/syncvg -v rootvg > /dev/null 2>&1 )& > /dev/null 2>&1\" >> /home/root/sync_mirr_once
+    echo \"/usr/sbin/rmitab sync_mirr\" >> /home/root/sync_mirr_once
+    echo \"rm /home/root/sync_mirr_once\" >> /home/root/sync_mirr_once
+    /usr/bin/chmod +x /home/root/sync_mirr_once
+    /usr/sbin/mkitab \"sync_mirr:2:once:/home/root/sync_mirr_once\" > /dev/null 2>&1
+  fi
+  ### END OF MIRROR VG SECTION ###
+EOF
+
+fi
+#applyng the paging size adjustement
+
+if [  ! -z $paging ];
+		then 
+
+cat << EOF >> $SCRIPTFILE
+createMonitorRecord \"Adjusting paging size\"
+#START CHANGE PAGING SIZE
+
+pp_size=\`lslv hd6 | grep \"PP SIZE\" | awk '{print \$6}'\`
+curr_paging_size=\`lsps -a | tail -1  | awk '{print \$4}' | awk -F \"M\" '{print \$1}
+'\`
+curr_pp_paging_size=\$(( \$curr_paging_size / \$pp_size ))
+wanted_pp_paging_size=\$(( $paging * 1024 / \$pp_size))
+diff_pp_paging_size=\$(( \$wanted_pp_paging_size - \$curr_pp_paging_size ))
+if [[ \$wanted_pp_paging_size -gt \$curr_pp_paging_size ]]; then
+chps -s \$diff_pp_paging_size hd6
+fi
+if [[ \$wanted_pp_paging_size -lt \$curr_pp_paging_size ]]; then
+chps -d \${diff_pp_paging_size#-} hd6
+fi
+
+
+
+#END CHANGE PAGING SIZE
+EOF
+
+fi
+
+
+cat << EOF >> $SCRIPTFILE
+createMonitorRecord "Set parameters for serial console. "
+echo "change the vty0/vty1 attributes in order to enable login from text console at next reboot (thanks to ibm support)"
+chdev -l vty0 -a runmodes='hupcl,cread,brkint,icrnl,opost,tab3,onlcr,isig,icanon,echo,echoe,echok,echoctl,echoke,imaxbel,iexten,clocal' -a logmodes='hupcl,cread,echoe,cs8,clocal' -P
+chdev -l vty1 -a runmodes='hupcl,cread,brkint,icrnl,opost,tab3,onlcr,isig,icanon,echo,echoe,echok,echoctl,echoke,imaxbel,iexten,clocal' -a logmodes='hupcl,cread,echoe,cs8,clocal' -P
+echo " cleaning /etc directory from unecessary first boot files "
+rm -f /etc/fb_*
+echo "adjusting the swap partition to hd6"
+swapon /dev/hd6
+tmppaging=\$( lsvg -l rootvg | grep paging00)
+if [[ ! \$tmppaging == \'\' ]]; then 
+swapoff /dev/paging00
+rmps paging00
+fi
+EOF
+
+
+# applying time zone and system reboot
+
+cat << EOF >> $SCRIPTFILE
+createMonitorRecord "Adjusting TZ values "
+### TIME ZONE SETTINGS ####
+/usr/bin/chtz $aixtz  > /dev/null 2>&1
+### END OF TIME ZONE SETTINGS ####
+EOF
+
+cat << EOF >> $SCRIPTFILE
+createMonitorRecord "Deleting adapter again to set to customer values and rebooting (final action) -- *****REBOOT*****"
+
+### END OF SETTING HOST FILE AND RUN INVENTORY VIA FTP###
+### DELETE OBJECTS AGAIN ###
+
+#Stops tcpip group subsystem
+/usr/bin/stopsrc -g tcpip > /dev/null 2>&1
+#Deletes etherchannels
+for curr_nic in \`/usr/sbin/lsdev -t ibm_ech 2> /dev/null | awk '{ print \$1 }'\`
+do
+tmp_val=\$( echo \$curr_nic | sed 's:ent:en:g' )
+/usr/sbin/ifconfig \$curr_nic delete > /dev/null 2>&1
+/usr/sbin/ifconfig \$tmp_val delete > /dev/null 2>&1
+/usr/sbin/chdev -l \$curr_nic -a state=detach > /dev/null 2>&1
+/usr/sbin/chdev -l \$tmp_val -a state=detach > /dev/null 2>&1
+/usr/sbin/rmdev -dl \$curr_nic -R > /dev/null 2>&1
+/usr/sbin/rmdev -dl \$curr_nic > /dev/null 2>&1
+/usr/sbin/rmdev -dl \$tmp_val -R > /dev/null 2>&1
+/usr/sbin/rmdev -dl \$tmp_val > /dev/null 2>&1
+done
+
+#Deletes adapters
+for curr_nic in \`/usr/sbin/lsdev -t en 2> /dev/null | awk '{ print \$1 }'\`
+do
+/usr/sbin/ifconfig \$curr_nic delete > /dev/null 2>&1
+/usr/sbin/chdev -l \$curr_nic -a state=detach > /dev/null 2>&1
+/usr/bin/odmdelete -o CuAt -q name=\"\$curr_nic\" > /dev/null 2>&1
+done
+### END OF DELETE OBJECTS ###
+# SET NETWORKING IF IPADDRESS ARGS IS HERE
+
+
+if [[ ! -z $ipaddress ]] && [[ !  -z $netmask  ]] && [[ ! -z $gateway  ]]
+then
+base_ip=$ipaddress
+
+### DECLARE VARIABLE ###
+
+        typeset prim_ada=\"en0\"
+        typeset sec_ada=\"NONE\"
+        typeset ech_ada=\":ech_name:\"
+        typeset clt=\"$hostname\"
+        typeset client_ip=\"$base_ip\"
+        typeset netm=\"$netmask\"
+        typeset gateway=\"$gateway\"
+        typeset tmp_val=\"\"
+        typeset if_type=\"direct\"
+        typeset domain=\"NONE\"
+        typeset nameserver=\"NONE\"
+### END OF DECLARE VARIABLE ###
+### SET IP ADDRESS FORCE ###
+        if [ \"\$if_type\" = 'ech' ]
+        then
+        tmp_val=\$(
+                        /usr/sbin/lsdev -Cc if | \
+                        awk ' \$1 ~ /^[ \\t]*en[0-9]+\$/ { gsub(/en/, \"\", \$1) ; print \$1 } ' | \\
+                        sort
+                  )
+        tmp_val=\$( echo \$tmp_val | awk ' { print \$NF } ' )
+        tmp_val=\"en\${tmp_val}\"
+        else
+        tmp_val=\$( echo \$prim_ada | sed 's:ent:en:g' )
+        fi
+
+        [ \"\$netm\" = 'NONE' ] && netm=\"\" || netm=\" -m \\\"\$netm\\\"\"
+        [ \"\$nameserver\" = 'NONE' ] && nameserver=\"\" || nameserver=\" -n \\\"\$nameserver\\\"\"
+        [ \"\$domain\" = 'NONE' ] && domain=\"\" || domain=\" -d \\\"\$domain\\\"\"
+        [ \"\$gateway\" = 'NONE' ] && gateway=\"\" || gateway=\" -g \\\"\$gateway\\\"\"
+
+        /usr/sbin/mktcpip -h \"\$clt\" -a \"\$client_ip\" \$netm -i \"\$tmp_val\" \$nameserver \$domain \$gateway -A'no' -t'N/A' -s''
+
+        [ -x \"/etc/rc.d/init.d/firstboot\" ] && \\
+                /etc/rc.d/init.d/firstboot
+
+
+fi
+### END OF SET IP ADDRESS FORCE ###
+
+
+### REBOOT!!!!!!! ###
+/usr/sbin/shutdown -Fr
+EOF
+log INFO "Finish to create the postinstall script file"
+
+
+log INFO "Changing the image.data file to be suitabble to restore"
+## Modify the virtual console in order to have access login . the console is disable by default if we dom't change the state
+## Cleanup the /etc directory from all fb_* scripts files, erasing eventually paging00 and activate hd6
+
+
+
+	# move the scripfile on correct dir and clean the temporary
+	cp $SCRIPTFILE /data/backup/bosinst/$SCRIPTFILEBASE
+	rm $SCRIPTFILE
+	
+	
+#*********************************************************************************************#
+#*******                                                                                ******#
+#*******                                                                                ******#
+#*******                    Change image.data to be suitable to restore                 ******#
+#*******                                                                                ******#
+#*******                                                                                ******#
+#*******                                                                                ******#
+#*******                                                                                ******#
+#*********************************************************************************************#
+img_data=/tmp/image_data_$random
+image_data_clean=image_data_$random    # the basename of image.data
+tab_res=/tmp/tab_res.$random
+bos_inst=/data/backup/bosinst
+typeset -i meter=1
+# get the real image_dat
+location=$(lsnim -l $image | grep location | awk '{print $3}')
+image_clean=$(basename $location)
+
+
+
+image_data=${location%$image_clean}image.data
+base_dir=${location%$image_clean}
+cp $image_data $img_data  > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+        cd $base_dir && restore -xq -f $location ./image.data > /dev/null 2>&1
+        cp $image_data $img_data  > /dev/null 2>&1
+        fi
+ awk '
+    BEGIN { found = 0 }
+    /^[ \t]*lv_data:[ \t]*$/ { found = 1 }
+    found == 0 { next }
+    found == 1 {
+      if ($0 ~ /^[ \t]*TYPE[ \t]*=[ \t]*paging[ \t]*$/) {
+        print $0 ; found = 2 } }
+    found == 2 {
+      if ($0 ~ /^[ \t]*COPIES|LPs|PP_SIZE|PP|LV_MIN_LPS[=]+[ \t]*.*$/) {
+        print } }
+  ' "$img_data" | \
+  while read curr_line
+do
+    curr_attr=$(
+      echo "$curr_line" | awk -F\= ' { gsub(/[ \t]*/, "", $1) ; print $1 } ' )
+    curr_val=$(
+      echo "$curr_line" | awk -F\= ' { gsub(/[ \t]*/, "", $2) ; print $2 } ' )
+
+    case "$curr_attr" in
+      'TYPE' ) curr_type="$curr_val" ;;
+      'COPIES' ) curr_copies="$curr_val" ;;
+      'LPs' ) curr_lps="$curr_val" ;;
+      'PP_SIZE' ) curr_pp_size="$curr_val" ;;
+      'PP' ) curr_pp="$curr_val" ;;
+      'LV_MIN_LPS' ) curr_lv_min_lps="$curr_val" ;;
+    esac
+
+    [ -z "$curr_type" ] && continue
+    [ -z "$curr_copies" ] && continue
+    [ -z "$curr_lps" ] && continue
+    [ -z "$curr_pp_size" ] && continue
+    [ -z "$curr_pp" ] && continue
+    [ -z "$curr_lv_min_lps" ] && continue
+
+    curr_size_in_mb=$(echo "( $curr_pp / $curr_copies ) * $curr_pp_size" | bc)
+    min_size_in_mb="1024"
+
+    target_disk_size=$(( target_disk_size + curr_size_in_mb ))
+    echo "$meter $curr_type $curr_size_in_mb $min_size_in_mb $curr_copies $curr_lps $curr_pp_size $curr_pp $curr_lv_min_lps" >> $tab_res
+
+    curr_type=""
+    curr_copies=""
+    curr_lps=""
+    curr_pp_size=""
+    curr_pp=""
+    curr_lv_min_lps=""
+
+
+    let meter="$meter + 1"
+  done
+
+  curr_fs_name=""
+  curr_size_in_mb=""
+  min_size_in_mb=""
+ awk '
+    BEGIN { found=0 }
+    /^[ \t]*fs_data:[ \t]*$/ { found = 1 }
+    found == 0 { next }
+    found == 1 {
+      if ($0 ~ /^[ \t]*FS_NAME|FS_SIZE|FS_MIN_SIZE[=]+[ \t]*.*$/) { print } }
+  ' "$img_data" | \
+  while read curr_line
+  do
+    curr_attr=$(
+      echo "$curr_line" | awk -F\= ' { gsub(/[ \t]*/, "", $1) ; print $1 } ' )
+    curr_val=$(
+      echo "$curr_line" | awk -F\= ' { gsub(/[ \t]*/, "", $2) ; print $2 } ' )
+
+    case "$curr_attr" in
+      'FS_NAME' ) curr_fs_name="$curr_val" ;;
+      'FS_SIZE' )
+        curr_size_in_mb=$( echo "$curr_val / 2 / 1024" | bc )
+        ;;
+      'FS_MIN_SIZE' )
+        min_size_in_mb=$( echo "scale=0 ; $curr_val / 2 / 1024" | bc )
+        min_size_in_mb=$(( min_size_in_mb + 2 ))
+        ;;
+    esac
+
+    [ -z "$curr_fs_name" ] && continue
+    [ -z "$curr_size_in_mb" ] && continue
+    [ -z "$min_size_in_mb" ] && continue
+
+    target_disk_size=$(( target_disk_size + curr_size_in_mb ))
+
+    echo "$meter $curr_fs_name $curr_size_in_mb $min_size_in_mb " >> $tab_res
+
+    curr_fs_name=""
+    curr_size_in_mb=""
+    min_size_in_mb=""
+    meter="$meter + 1"
+  done
+cat $tab_res | \
+        while read curr_cfg
+        do
+          curr_name=""
+          curr_name_for_awk=""
+          curr_wanted_size=""
+
+          curr_name=$( echo $curr_cfg | awk '{ print $2 } ' )
+          curr_name_for_awk=$( echo $curr_name | sed 's:/:\\/:g' )
+          curr_size=$( echo $curr_cfg | awk '{ print $3 } ' )
+          curr_wanted_size=$curr_size
+
+          if [ ! "$curr_name" = 'paging' ]
+          then
+            curr_wanted_size=$(
+              echo "scale=0 ; $curr_wanted_size * 2 * 1024" | bc )
+
+
+awk '
+              BEGIN { found = 0 }
+              $0 ~ /^[ \t]*fs_data:[ \t]*$/ { found = 1 ; print ; next }
+              found == 1 {
+                if ($0 ~ /^[ \t]*FS_NAME[ \t]*=[ \t]*'"$curr_name_for_awk"'[ \t]*$/) {
+                  found = 2 }
+                else { print } }
+              found == 2 {
+                if ($0 ~ /^[ \t]*FS_MIN_SIZE[ \t]*=[ \t]*[0-9]*[ \t]*$/) {
+                  gsub(/\=.*/, "= '"$curr_wanted_size"'") ; print $0 ; found = 0 ; next }
+                else {
+                  print }  }
+              found == 0 { print }
+            ' $img_data > ${img_data}.tmp && \
+            mv ${img_data}.tmp $img_data
+          else
+            final_lps=""
+            final_pp=""
+curr_copies=$( echo $curr_cfg | awk '{ print $5 }' )
+            curr_lps=$( echo $curr_cfg | awk '{ print $6 }' )
+            curr_pp_size=$( echo $curr_cfg | awk '{ print $7 }' )
+            curr_pp=$( echo $curr_cfg | awk '{ print $8 }' )
+            curr_lv_min_lps=$( echo $curr_cfg | awk '{ print $9 }' )
+
+            #round the wanted size to next pp_size multiple.
+            if (( "$curr_wanted_size" % "$curr_pp_size" != 0 ))
+            then
+              curr_wanted_size=$(( "$curr_wanted_size" + ("$curr_pp_size" - ("$curr_wanted_size" % "$curr_pp_size")) ))
+            fi
+
+            [ "$curr_size" = "$curr_wanted_size" ] && continue
+
+            final_lps=$(
+              echo "scale=0 ; $curr_wanted_size / $curr_pp_size" | bc )
+            final_pp=$( echo "$final_lps * $curr_copies" | bc )
+            curr_lv_min_lps="$final_lps"
+
+            awk '
+              BEGIN { found = 0 }
+              $0 ~ /^[ \t]*lv_data:[ \t]*$/ { found = 1 ; print ; next }
+              found == 1 {
+                if ($0 ~ /^[ \t]*TYPE[ \t]*=[ \t]*paging[ \t]*$/) {
+                  found = 2 }
+                else { print } }
+              found == 2 {
+                if ($0 ~ /^[ \t]*LPs[ \t]*=[ \t]*[0-9]*[ \t]*$/) {
+                  gsub(/\=.*/, "= '"$final_lps"'") ; print $0 ; next }
+                else {
+                  if ($0 ~ /^[ \t]*PP[ \t]*=[ \t]*[0-9]*[ \t]*$/) "{
+                    gsub(/\=.*/, "= '"$final_pp"'") ; print $0 ; next }
+                  else {
+                    if ($0 ~ /^[ \t]*LV_MIN_LPS[ \t]*=[ \t]*[0-9]*[ \t]*$/) {
+                      gsub(/\=.*/, "= '"$curr_lv_min_lps"'") ; print $0 ; next }
+                    else { print } } } }
+              found == 0 { print }
+            ' $img_data > ${img_data}.tmp && \
+            mv ${img_data}.tmp $img_data
+          fi
+        done
+
+        awk '
+          BEGIN { found = 0 }
+          $0 ~ /^[ \t]*logical_volume_policy:[ \t]*/ { found = 1 ; print ; next }
+          found == 1 {
+            if( $0 ~ /^[ \t]*SHRINK[ \t]*=[ \t]*.*[ \t]*$/) {
+              gsub(/\=.*/, "= yes") ; print $0 ; next }
+            else {
+              if( $0 ~ /^[ \t]*EXACT_FIT[ \t]*=[ \t]*.*[ \t]*$/) {
+                gsub(/\=.*/, "= no") ; print $0 ; next }
+              else { print } } }
+          found == 0 { print }
+        ' $img_data > ${img_data}.tmp && \
+        mv ${img_data}.tmp $img_data
+
+#Remove mirroring definition
+
+cat  $img_data | while read LINE ; do
+  if [ "${LINE}" = "COPIES= 2" ] ; then
+    COPIESFLAG=1
+    echo "COPIES= 1"
+  else
+    if [[ $COPIESFLAG -eq 1 ]] ; then
+      PP=$(echo ${LINE} | awk '{print $1}')
+      if [ "${PP}" = "PP=" ] ; then
+        PPNUM=$(echo ${LINE} | awk '{print $2}')
+        ((PPNUMNEW=PPNUM/2))
+        echo "PP= ${PPNUMNEW}"
+        COPIESFLAG=0
+      else
+        echo "${LINE}"
+      fi
+    else
+      echo "${LINE}"
+    fi
+  fi
+done >  $img_data_$random
+mv $img_data_$random $img_data
+
+#Define the new image.data on nim server
+
+
+cp $img_data /$bos_inst/$image_data_clean  > /dev/null 2>&1
+nim -o define -t image_data  -a server=master -a location=$bos_inst/$image_data_clean $image_data_clean > /dev/null 2>&1
+
+# clean temporary files
+
+
+rm $img_data
+rm $tab_res
+
+log INFO "Resetting the cpuid on client"
+#*********************************************************************************************#
+#*******                                                                                ******#
+#*******                                                                                ******#
+#*******                    Reset cpuid on client and launch restore                    ******#
+#*******                                                                                ******#
+#*******                                                                                ******#
+#*******                                                                                ******#
+#*******                                                                                ******#
+#*********************************************************************************************#
+
+
+	# reset cpuid value if exists
+
+
+nim -Fo change -a cpuid= $nimclient > /dev/null 2>&1
+
+
+### Define the fb_script resource if not set
+FBSCRIPT=$(lsnim | grep "$SCRIPTFILEBASE")
+if [ -z "$FBSCRIPT" ]
+then
+nim -o define -t fb_script -a server=master \
+-a location=$bos_inst/$SCRIPTFILEBASE $SCRIPTFILEBASE
+fi
+
+#Reset before to allocate
+log INFO "Resetting resources before to allocate"
+nim -F -o reset $nimclient 
+nim -o deallocate -a subclass=all $nimclient
+# trim $SPOT var....
+SPOT=$(print "$SPOT" | nawk '{gsub(/^[ ]*/,"",$0); gsub(/[ ]*$/,"",$0) ; print }')
+
+
+
+
+log INFO "Instanciating restore on $nimclient ......"
+# Allocate restore resource
+
+/usr/sbin/nim -o bos_inst \
+           -a source=mksysb \
+           -a bosinst_data=bosinst_data_def \
+           -a image_data=$image_data_clean \
+           -a spot=$SPOT \
+           -a preserve_res=yes \
+           -a mksysb=$image \
+           -a fb_script=$SCRIPTFILEBASE \
+           -a no_client_boot=yes \
+           -a accept_licenses=yes \
+        $nimclient
+ret=$?
+if [ $ret -ne 0 ]; then
+log ERROR "An error occured launching the nim -o bosinst command"
+exit $ret
+else
+if [ ! -z "$bootClient" ]; then
+log WARN "Power on the client $nimclient in $bootClient mode"
+log WARN "This script is started in background to avoid to wait for the end (it takes around 4 minutes)"
+powerOnAndInstall  &
+fi
+fi
+
+
+# check mksysb installation
+# I cannot build a function here because backgrounding brokes the script
+PK="["$salesOrder"]["$nimclient"]"
+URI="http://x.x.x.204/SPOT/provisioning/api/provisioningnotifications/$PK"
+COUNTER=0
+CMD="$LSNIM -l $nimclient"
+BOOTIP=$(echo  "$NIMHOSTS" | grep $nimclient | awk '{print $1}')
+while :
+do
+        CSTATE=$($CMD | grep "Cstate" | awk -F "=" '{print  $2}')
+        MSTATE=$($CMD | grep "Mstate" | awk -F "=" '{print  $2}')
+        INFO=$($CMD |  grep "info" | awk -F " " '{print $5}' )
+        INFOS=$($CMD |  grep "info" )
+	if [[ "$CSTATE" == *"ready"* ]]; then
+		PROGRESS=100
+	else
+        	PROGRESS=${INFO%?}
+	fi
+        COUNTER=$((COUNTER + 1))
+        REST="{
+        \"notifid\":\"$PK\",
+        \"hostname\":\"$hostname\",
+        \"installationip\":\"<a href='https://x.x.x.21/guacamole/' target='_blank'>cyclades://$BOOTIP</a>\",
+        \"configuredip\":\"$ipaddress\",
+        \"status\":\"<b>$CSTATE<br />$MSTATE<br />$INFOS</b>\",
+        \"progress\":\"$PROGRESS\",
+        \"image\":\"$image\",
+        \"firmware\":\"IBM OpenFirmware\",
+        \"ram\":\"N/D\",
+        \"cpu\":\"N/D\",
+        \"diskscount\":\"N/D\",
+        \"netintcount\":\"N/D\",
+        \"model\":\"N/D\",
+        \"serial\":\"N/D\",
+        \"os\":\"$SPOT\"
+        }"
+
+        # Write monitoring infos to web service
+SEND  >/dev/null 2>&1
+
+        # check the percent if is 100%
+        if [[ $PROGRESS -eq 100 ]] || [[ $COUNTER -eq 240 ]]; then
+                break
+        fi
+sleep 30
+done  >/dev/null  2>&1 &
+
+
+# End of file

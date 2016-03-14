@@ -1,0 +1,447 @@
+#!/bin/bash  
+# This script is launch from DB to check if on rack shelf a client is connected
+# Can check Power machines and pxe clients
+#
+#
+#
+#
+
+checkRackBootp () {
+# exit 144 => no connection
+# exit 145 => asmi presents
+line=$(echo  "$CYCLADES" | grep "$rackPosition" | awk '{print $2}')
+address=$(echo "$line" | awk -F ":" '{print $1}')
+port=$(echo "$line" | awk -F ":" '{print $2}')
+log INFO "Checking if IBM machine is connected on $rackPosition"
+/usr/bin/expect  >/dev/null 2>&1 <<EXP
+set send_slow {1 .1}
+catch {spawn -noecho telnet $address $port}
+set timeout 2
+#Default value is 300
+set sig 400
+expect {
+         " DEVICE LOCKED" { puts "*********locked"; set sig 400}
+         "onnected" {
+                 send \n;
+                 }
+         "ogin: " {
+                 puts "**** already active exiting";set sig 400;
+                 }
+         }
+         send \n;
+         expect {
+                "out."      {
+                            puts "The server is connected"; set sig 401 }
+                "User ID: " { puts "The server is connected"; set sig 401 }
+                "ogin: " {
+                 puts "**** already active exiting"; set sig 401;
+                 }
+                "S1> " { puts "The server is connected"; send 99\n; set sig 401 }
+                }
+puts "exit signal is \$sig"
+#send_error "\$sig"
+exit \$sig
+close
+expect eof
+EXP
+RET=$?
+[[ $RET -eq 144 ]] && log WARN "I can't detected a IBM client on $nimclient . Check if the telnet connection is not owned by something else" 
+[[ $RET -eq 145 ]] && log INFO "Good! A IBM client has been detected"  && writeInDb 1 && exit 0
+#echo $RET
+}
+
+checkRackDhcp () {
+nimclient=$(ssh x.x.x.205 "lsnim -c machines | grep $rackPosition")
+valid_ip $rackPosition
+ [[ -z "$nimclient" ]] &&  [ $ERROR -ne 0 ]   && log ERROR "Hey, this client doesn't exists ...! check your spelling" && exit 1
+
+RET=145
+#check valid client
+valid_ip $rackPosition
+
+clientIP=$(findIPMAC $rackPosition "IP" 2>/dev/null | head -1)
+if [[ "$clientIP" != "" ]]; then
+        ping -c 1 $clientIP  > /dev/null 2>&1
+        PING=$?
+        if [[ $PING -ne 0 ]] ; then
+                RET=144
+                log ERROR "I didn't found any pxe client at/on $rackPosition" 
+		writeInDb 4
+        else
+                log INFO "Good! the client is a valid pxe client and it is well connected."
+		writeInDb 2
+        fi
+else
+        RET=144
+        log ERROR "I didn't found any pxe client at/on $rackPosition"
+	writeInDb 4
+fi
+}
+
+#function to update db infos on racks
+writeInDb () {
+REST='{"idracks":"'$rackPosition'","reponse":"'$1'"}'
+uri="http://x.x.x.204/SPOT/provisioning/api/sysprodracks/$rackPosition"
+(
+perl - "$REST"  "$uri" <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $REST = shift;
+my $uri = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'PUT', "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+_HERE_
+)   >/dev/null 2>&1
+
+timestamps=$(date '+%F %T')
+REST='{"salesorder":"'"$rackPosition"'","status":"OK","data":"'"$clientIP"'","creator":"1","message":"Dhcp Ip address","timestamps":"'"$timestamps"'","dwprocessed":"1"}'
+uri="http://x.x.x.204/SPOT/provisioning/api/tempdata/$rackPosition"
+(
+perl - "$REST"  "$uri" <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $REST = shift;
+my $uri = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'PUT', "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+_HERE_
+)   >/dev/null 2>&1 
+
+}
+
+usage () {
+echo "usage $0
+-pos [rack_shelf | client ip]
+"
+}
+
+
+# Function to find ip address or mac address of given rack shelf
+# should be called with a rack shelf and kind of value you want to find as argument
+
+findIPMAC () {
+rack=$1
+value=$2
+
+#check if rack caontains an ip address
+#if so, we can continue directly to grab the MAC if asked
+valid_ip $rack
+if [ "$ERROR" -eq 0 ]; then
+ip_client=$rack
+client_mac=$(arp -n | grep -w "$ip_client" |  awk '{print $3}')
+if [[ -z "$client_mac" ]]; then
+log ERROR "I didn't find any client mac address for IP: $rack!"
+exit 1
+fi
+client_mac=$(echo "${client_mac,,}")
+if [[ "$value" == "IP" ]]; then
+                                                        echo  -e  $ip_client \\n
+                                                        else
+                                                                if [[ "$value" == "MAC" ]]; then
+                                                                echo -e $client_mac \\n
+                                                                else
+                                                                log ERROR "MANDATORY param $value is missing or not valid"
+                                                                fi
+                                                        fi
+
+
+else
+
+switch=$(echo $rack | awk -F "_" '{print $1}')
+floor=$(echo $rack | awk -F "_" '{print $2}')
+# end of data collection
+
+# begin of switch_maps parsing
+
+switch_ip=$(echo "$switch_maps" | grep -w "$switch" | awk  '{print $2}')
+# this needed to map switch 2 as it is different from the others
+        if [[ "$switch" == "rack2" ]] ; then floor=$(echo $floor | sed 's/...../&2/g;s/2$//') ; fi
+switch_port=$(echo "$switch_maps" | grep $floor | awk  '{print $2}')
+# end switch map parsing
+# find the macs connected:
+client_mac=$(perl /usr/sbin/switchlabel.pl $switch_ip public | grep -w "port $switch_port" | awk '{print $2}' )
+# transform lowercase for arp output
+if [[ -z "$client_mac" ]]; then
+log ERROR "I didn't find any client on the rack shelf: $rackPosition!"
+exit 1
+fi
+client_mac=$(echo "${client_mac,,}")
+#echo $client_mac
+# find the ip for the client
+        if [[ ! "$client_mac" == "" ]]; then
+                for i in $client_mac; do
+                ip_client=$(arp -n | grep  -w "$i" | awk '{print $1}')
+                        if  [[ ! "$ip_client" == "" &&  ! "$ip_client_ctrl" =~ $ip_client ]]; then
+                        for b in $ip_client; do
+                        sshpass -p ***REMOVED***  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=2 root@$b exit  >> /dev/null 2>&1
+                        if [ $? -eq 0 ]; then
+                                                        if [[ "$value" == "IP" ]]; then
+                                                        echo  -e  $b \\n
+                                                        else
+                                                                if [[ "$value" == "MAC" ]]; then
+                                                                echo -e $i \\n
+                                                                else
+                                                                log ERROR "MANDATORY param $value is missing or not valid"
+                                                                fi
+                                                        fi
+                        fi
+                        done
+                        ip_client_ctrl=$ip_client_ctrl" "$ip_client
+                        fi
+
+               done
+        else
+        return 1
+        fi
+fi
+}
+
+
+#Function log for better printing
+
+log() {
+local level=${1?}
+shift
+local code=""
+local line="[$(date '+%F %T')] $level: $*"
+if [ -t 2 ]
+then
+case "$level" in
+INFO) code=36 ;;
+DEBUG) code=30 ;;
+WARN) code=33 ;;
+ERROR) code=31 ;;
+*) code=37 ;;
+esac
+echo -e "\e[${code}m${line}\e[0m"
+else
+echo "$line"
+fi >&2
+
+REST='{"title":"'`basename $0`' | '$rackPosition'","content":"'$line'","userid":"'$(whoami)'","date":"'$(date)'"}'
+(
+perl - "$REST"  <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $uri = "http://x.x.x.204/SPOT/provisioning/api/events";
+my $REST = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'POST', "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+_HERE_
+)  >/dev/null 2>&1 
+
+
+}
+
+
+check_args() {
+#put here the mandatory params
+([[  -z "$rackPosition" ]] ) && rackPosition="usage"  && log ERROR "Some mandatory parameters missing!!!!!" && usage && exit 1
+ #check valid client
+nimclient=$(ssh x.x.x.205 "lsnim -c machines | grep $rackPosition")
+valid_ip $rackPosition
+ [[ -z "$nimclient" ]] &&  [ $ERROR -ne 0 ]   && log ERROR "Hey, this client doesn't exists ...! check your spelling" && exit 1
+ #check valid TaskID
+}
+# Gets the cyclades and swithes values from DB
+getEnv() {
+
+Rack=$(echo $rackPosition | awk -F "_" '{print $1}')
+Shelf=$(echo $rackPosition | awk -F "_" '{print $2}')
+Rack=$(echo $Rack | sed 's/[^0-9]//g')
+#Rack=$(echo  "${Rack##${Rack%%?}}")
+Shelf=$(echo  "${Shelf##${Shelf%%?}}")
+
+
+log INFO "About to download env values from http://x.x.x.204/SPOT/provisioning/api/sysprodracksmappings?Rack_Equals=$Rack&Shelf_Equals=$Shelf"
+URI="http://x.x.x.204/SPOT/provisioning/api/sysprodracksmappings?Rack_Equals=$Rack&Shelf_Equals=$Shelf"
+results=$(
+perl - "$URI"  <<'_HERE_'
+use Time::Piece;
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+
+my $WEB = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'GET', "$WEB" );
+my $resp = $lwp->request($req);
+my $decoded = decode_json($resp->content);
+#my %recursive = ( $decoded->{rows} );
+#print $req->as_string;
+#print Dumper $resp;
+#print Dumper $decoded->{rows}->[0]->{switchip};
+my $switchip = $decoded->{rows}->[0]->{switchip};
+my $bootpip = $decoded->{rows}->[0]->{bootpip};
+my $cycladesip = $decoded->{rows}->[0]->{cycladesip};
+my $cycladesport = $decoded->{rows}->[0]->{cycladesport};
+my $switchport = $decoded->{rows}->[0]->{switchport};
+my $rack = $decoded->{rows}->[0]->{rack};
+my $shelf = $decoded->{rows}->[0]->{shelf};
+print "$switchip\n$bootpip\n$cycladesip\n$cycladesport\n$switchport\n$rack\n$shelf\n";
+_HERE_
+)
+#> /dev/null 2>&1
+counter=1
+for i in $results
+do
+case $counter in
+1) switchip=$i;;
+2) bootpip=$i;;
+3) cycladesip=$i;;
+4) cycladesport=$i;;
+5) switchport=$i;;
+6) rack=$i;;
+7) shelf=$i;;
+esac
+counter=$((counter + 1))
+done
+#Prepare the string for parsing
+CYCLADES="rack"$rack"_shelf$shelf $cycladesip:$cycladesport"
+case $rack in
+2) switch_maps="rack$rack $switchip
+shelf$rack$shelf $switchport"
+;;
+*) switch_maps="rack$rack $switchip
+shelf$shelf $switchport"
+;;
+esac
+
+log INFO "The env values for cyclades are $CYCLADES and for switches $switch_maps"
+}
+
+# check IP address function
+valid_ip() {
+ERROR=0
+    oldIFS=$IFS
+    IFS=.
+    set -f
+    set -- $1
+    if [ $# -eq 4 ]
+    then
+      for seg
+      do
+        case $seg in
+            ""|*[!0-9]*) ERROR=1;break ;; ## Segment empty or non-numeric char
+            *) [ $seg -gt 255 ] && ERROR=2 ;;
+        esac
+      done
+    else
+      ERROR=3 ## Not 4 segments
+    fi
+    IFS=$oldIFS
+    set +f
+    return $ERROR
+}
+
+#Actually Get the arguments
+
+while :
+do
+    case "$1" in
+          -pos )
+          rackPosition="$2" # You may want to check validity of $2
+          shift 2
+          ;;
+*)      break
+;;
+           esac
+done
+
+#Set the environmental values needed
+getEnv 
+check_args
+
+valid_ip $rackPosition 
+
+if [ $? -eq 0 ]; then
+checkRackDhcp
+else
+
+checkRackBootp
+
+checkRackDhcp
+fi

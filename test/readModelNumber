@@ -1,0 +1,145 @@
+#!/bin/bash
+
+checkRackBootp () {
+  TEST=$(which expect)
+  EXPECT=${TEST:-/usr/local/bin/expect}
+  line=$(echo  "$CYCLADES" | grep "$rackPosition" | awk '{print $2}')
+  address=$(echo "$line" | awk -F ":" '{print $1}')
+  port=$(echo "$line" | awk -F ":" '{print $2}')
+  OUTPUT=$($EXPECT  -c "
+	#exp_internal 1
+	spawn  telnet $address $port
+	expect \" *\"
+	send \\n
+	expect \"  \"
+	send \\n
+	expect \" *\"
+	send \\n
+  " )
+  word="type"
+  while IFS= read -r line
+  do
+    test "${line#*$word}" != "$line" &&  tmp=${line#*:}  && echo $tmp
+  done <<< "$OUTPUT"
+
+#LOG=$(echo $LOG | grep Machine)
+  RET=$?
+  [[ $RET -eq 144 ]] &&  echo "I can't detected a IBM client on $nimclient . Check if the telnet connection is not owned by something else"
+  #echo $RET
+}
+
+
+usage () {
+echo "usage $0
+-pos [rack_shelf | client ip]
+"
+}
+
+
+
+
+
+# Gets the cyclades and swithes values from DB
+getEnv() {
+
+Rack=$(echo $rackPosition | awk -F "_" '{print $1}')
+Shelf=$(echo $rackPosition | awk -F "_" '{print $2}')
+Rack=$(echo $Rack | sed 's/[^0-9]//g')
+#Rack=$(echo  "${Rack##${Rack%%?}}")
+Shelf=$(echo  "${Shelf##${Shelf%%?}}")
+
+
+URI="http://x.x.x.204/SPOT/provisioning/api/sysprodracksmappings?Rack_Equals=$Rack&Shelf_Equals=$Shelf"
+results=$(
+perl - "$URI"  <<'_HERE_'
+use Time::Piece;
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+
+my $WEB = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'GET', "$WEB" );
+my $resp = $lwp->request($req);
+my $decoded = decode_json($resp->content);
+#my %recursive = ( $decoded->{rows} );
+#print $req->as_string;
+#print Dumper $resp;
+#print Dumper $decoded->{rows}->[0]->{switchip};
+my $switchip = $decoded->{rows}->[0]->{switchip};
+my $bootpip = $decoded->{rows}->[0]->{bootpip};
+my $cycladesip = $decoded->{rows}->[0]->{cycladesip};
+my $cycladesport = $decoded->{rows}->[0]->{cycladesport};
+my $switchport = $decoded->{rows}->[0]->{switchport};
+my $rack = $decoded->{rows}->[0]->{rack};
+my $shelf = $decoded->{rows}->[0]->{shelf};
+print "$switchip\n$bootpip\n$cycladesip\n$cycladesport\n$switchport\n$rack\n$shelf\n";
+_HERE_
+)
+#> /dev/null 2>&1
+counter=1
+for i in $results
+do
+case $counter in
+1) switchip=$i;;
+2) bootpip=$i;;
+3) cycladesip=$i;;
+4) cycladesport=$i;;
+5) switchport=$i;;
+6) rack=$i;;
+7) shelf=$i;;
+esac
+counter=$((counter + 1))
+done
+#Prepare the string for parsing
+CYCLADES="rack"$rack"_shelf$shelf $cycladesip:$cycladesport"
+case $rack in
+2) switch_maps="rack$rack $switchip
+shelf$rack$shelf $switchport"
+;;
+*) switch_maps="rack$rack $switchip
+shelf$shelf $switchport"
+;;
+esac
+
+#echo "The env values for cyclades are $CYCLADES and for switches $switch_maps"
+}
+
+
+#Actually Get the arguments
+
+while :
+do
+    case "$1" in
+          -pos )
+          rackPosition="$2" # You may want to check validity of $2
+          shift 2
+          ;;
+*)      break
+;;
+           esac
+done
+
+#Set the environmental values needed
+getEnv
+
+
+
+checkRackBootp

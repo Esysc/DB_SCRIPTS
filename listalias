@@ -1,0 +1,12 @@
+#!/bin/bash
+
+
+list=$(ifconfig | grep eth2: | grep -v eth2:0 | awk '{print $1}')
+#prepare nice table
+for i in $list 
+do 
+	INT=$(echo "$i")
+conf=$(ifconfig  $INT)
+	VAR=$(echo "$conf" | grep addr | awk -F " " '{print $2}' | awk -F ":" '{print $2}')
+	echo  "$INT  -->  $VAR |"
+	done

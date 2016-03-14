@@ -1,0 +1,886 @@
+#!/bin/bash 
+# ---------------------------------------------------------------------------
+# mondoWrapper - Restore comopletely mondoarchives to new physical/virtual machines using the existing PXE environment
+
+# Copyright 2015, root <root@drbl01>
+  
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+# Usage: mondoWrapper [-h|--help] [-iso] [-ip] [-n] [-g] [-s] [-h] [-pos] [-iloip] [-ilonm]
+
+# Revision history:
+# 2015-04-23 Created by template_generator ver. 3.3
+# Added time server synchronisation part 2015-05-12
+# 2015-06-1  - Added support to GEN 9 servers (removed hpacu* and installed hpssa* )
+# 2015-06-1  - Added  GrubInstall function to refresh grub installation
+# 2015-06-17 - Removed   hyphens from function nameing convention, replace within underscore
+# ---------------------------------------------------------------------------
+
+PROGNAME=${0##*/}
+VERSION="2.2"
+isoPATH="/lysis"
+ISO_MOUNT_DIR="/media/"
+output_directory="/mnt/RESTORING"
+mount_directory="/lysis"
+PACKAGER="/packager"
+
+mount_me() {
+mountlist=/tmp/tmp/mountlist.txt
+if [ "$#" -ne "0" ] ;then
+    echo "mount_me <no params>"
+    echo "...mountlist is assumed to be at $mountlist"
+    exit 1
+fi
+
+if [ ! -f "$mountlist" ] ; then
+    echo "I cannot find the mountlist '$mountlist'. Aborting."
+    exit 1
+fi
+
+paths=`grep -vE " raid |lvm lvm" $mountlist | tr -s ' ' ' ' | cut -d' ' -f2 | sort`
+> $mountlist.sorted
+for i in $paths ; do
+    grep " $i " $mountlist >> $mountlist.sorted
+done
+mount_subroutine_me < $mountlist.sorted
+
+
+}
+
+
+syncTime () {
+step="Synching server time: "
+log INFO "$step current date is `date`"
+log INFO "$step stopping the ntp service..."
+service ntp stop
+log INFO "$step contacting the x.x.x.204 server ..."
+ntpdate x.x.x.204
+log INFO "$step setting the hardware clock to UTC"
+hwclock --systohc --utc
+
+
+}
+
+
+
+i_want_my_lvm() {
+SDA1=$1
+SDA2=$2
+
+echo y | lvm pvcreate -ff $SDA2
+vgscan
+
+#Create and activate the VG's (volume groups).
+vgcreate VolGroup00 -l 0 -p 0 -s 32.00m $SDA2
+vgchange -a y VolGroup00
+
+#Finally, create the LV's (logical volumes).
+
+ echo y |  lvcreate -L 20480m -r auto -n swaplv VolGroup00
+ echo y |  lvcreate -L 3072m -r auto -n LogVol00 VolGroup00
+ echo y |  lvcreate -L 5120m -r auto -n usrlv VolGroup00
+ echo y |  lvcreate -L 15360m -r auto -n homelv VolGroup00
+ echo y |  lvcreate -L 20480m -r auto -n optlv VolGroup00
+ echo y |  lvcreate -L 10240m -r auto -n tmplv VolGroup00
+ echo y |  lvcreate -L 20480m -r auto -n datalv VolGroup00
+ echo y |  lvcreate -L 40960m -r auto -n softlv VolGroup00
+ echo y |  lvcreate -L 30720m -r auto -n u01lv VolGroup00
+
+lvm vgscan
+#Now you may format the LV's:-
+
+mkswap /dev/VolGroup00/swaplv
+ext=`cat /tmp/tmp/mountlist.txt | grep LogVol00 | awk '{print $3}'`
+mkfs -t $ext /dev/VolGroup00/LogVol00
+ext=`cat /tmp/tmp/mountlist.txt | grep usrlv | awk '{print $3}'`
+mkfs -t $ext /dev/VolGroup00/usrlv
+ext=`cat /tmp/tmp/mountlist.txt | grep homelv | awk '{print $3}'`
+mkfs -t $ext /dev/VolGroup00/homelv
+ext=`cat /tmp/tmp/mountlist.txt | grep optlv | awk '{print $3}'`
+mkfs -t $ext /dev/VolGroup00/optlv
+ext=`cat /tmp/tmp/mountlist.txt | grep tmplv | awk '{print $3}'`
+mkfs -t $ext /dev/VolGroup00/tmplv
+ext=`cat /tmp/tmp/mountlist.txt | grep datalv | awk '{print $3}'`
+mkfs -t $ext /dev/VolGroup00/datalv
+ext=`cat /tmp/tmp/mountlist.txt | grep softlv | awk '{print $3}'`
+mkfs -t $ext /dev/VolGroup00/softlv
+ext=`cat /tmp/tmp/mountlist.txt | grep u01lv | awk '{print $3}'`
+mkfs -t $ext /dev/VolGroup00/u01lv
+ext=`cat /tmp/tmp/mountlist.txt | grep $SDA1 | awk '{print $3}'`
+mkfs -t $ext $SDA1
+
+
+}
+
+mount_subroutine_me() {
+
+echo "mount-subroutine-me --- starting"
+if [ "$#" -ne "0" ] ; then
+    echo "mount-subroutine-me < mountlist" 1
+    exit 1
+fi
+
+# ----------- mount partitions to be restored to --------------
+
+#echo "START mount_me"
+
+errors=0
+
+read incoming
+while [ "$incoming" != "" ] ; do
+    partno=`echo $incoming | cut -d' ' -f1`
+    mountpt=`echo $incoming | cut -d' ' -f2`
+    mounttype=`echo $incoming | cut -d' ' -f3`
+    mountdir="/mnt/RESTORING$mountpt"
+    if [ "$mounttype" = "swap" ] ; then
+                swapon $partno
+    else
+        if [ -e "$mountdir" ] && [ ! -d "$mountdir" ] ; then
+            echo "$mountdir exists (but not a dir). Deleting..." 2
+            rm -f "$mountdir"
+            mkdir -p "$mountdir"
+        else
+            echo "Making dir $mountdir..." 2
+            mkdir -p "$mountdir"
+        fi
+            echo "$mountdir mounted ok." 2
+        echo "Mounting $partno..." 2
+                if [ -e "/tmp/MOUNT-READONLY" ] ; then
+            mount $partno -t $mounttype -o ro $mountdir
+        else
+            mount $partno -t $mounttype $mountdir
+        fi
+                res=`mount | grep "$partno"`
+                if [ "$res" = "" ] ; then
+                echo "I think I failed to mount $partno" 3
+                else
+            echo "$partno mounted ok." 2
+        fi
+    fi
+    read incoming
+    [ "$incoming" != "" ] || read incoming
+done
+
+     echo "All partitions mounted ok." 3
+
+echo "mount-subroutine-me --- leaving"
+
+
+}
+
+unmount_me() {
+
+mountlist=/tmp/tmp/mountlist.txt
+
+if [ "$#" -ne "0" ] ;then
+    echo "unmount_me <no params>"
+    echo "...mountlist is assumed to be at $mountlist"
+    exit 1
+fi
+
+#unmount-subroutine-me < $mountlist
+#unmount-subroutine-me < $mountlist
+
+#for j in 1 2 ; do
+for i in `mount | grep /mnt/RESTORING | cut -d' ' -f3 | sort -r`; do
+    umount $i
+done
+
+for i in `cut -d' ' -f1 /proc/swaps | grep /dev`; do
+    swapoff $i
+done
+
+
+}
+
+runConfnet(){
+chroot $output_directory /bin/bash -c /tmp/postinstall.sh
+rm $output_directory/tmp/postinstall.sh
+}
+createConfnet () {
+
+
+BROADCAST=$(ipcalc $ipaddress/$netmask | grep Broadcast | awk '{print $2}')
+NETWORK=$(ipcalc $ipaddress/$netmask | grep Network | awk '{print $2}' | awk -F "/" '{print $1}')
+confnetFile="$output_directory/tmp/postinstall.sh"
+data=`date`
+
+confnetContent="
+#!/bin/bash
+echo '===================================================================================='
+echo '=========                                                                   ========'
+echo '=========                DRBL postinstall environment                       ========'
+echo '=========       customisation script for '$rackPosition' '$hostname'        ========'
+echo '=========                                                                   ========'
+echo '=========                *****************************                      ========'
+echo '=========                *****************************                      ========'
+echo '=========                *****************************                      ========'
+echo '=========                *****************************                      ========'
+echo '=========                                                                   ========'
+echo '===================================================================================='
+cat > /etc/sysconfig/network << EOF
+NETWORKING=yes
+NETWORKING_IPV6=no
+HOSTNAME=$hostname
+GATEWAY=$gateway
+EOF
+
+cat > /etc/sysconfig/network-scripts//ifcfg-eth0 << EOF
+DEVICE=eth0
+BOOTPROTO=static
+BROADCAST=$BROADCAST
+IPADDR=$ipaddress
+NETMASK=$netmask
+GATEWAY=$gateway
+NETWORK=$NETWORK
+ONBOOT=yes
+EOF
+
+
+cat > /etc/resolv.conf << EOF
+#
+#
+#      This file has been emptied by the post instal script to avoid unuseful behaviors
+#
+#
+#
+domain localdomain
+EOF
+
+echo $ipaddress $hostname'.localdomain' $hostname >> /etc/hosts
+echo $gateway'      time' >> /etc/hosts
+echo 'time' >> /etc/ntp/step-tickers
+echo 'server time' >> /etc/ntp.conf
+service ntpd restart
+sleep 5
+# To avoid umount crying on busy partition
+service ntpd stop
+
+#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@        Added for NET
+#echo '10.0.139.1       mlds01.localdomain' >> /etc/hosts
+#cp /etc/rc.local /etc/rc.local.save
+
+
+#cat > /etc/installpuppet << EOF
+##!/bin/bash
+#bash <(curl -s http://mlds01.localdomain:8080/installpuppet.sh)
+#mv /etc/rc.local.save /etc/rc.local
+#rm /etc/installpuppet
+#EOF
+
+#chmod 755 /etc/installpuppet
+
+#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@          End added for NET
+
+echo Installation number:  $salesOrder performed on $data >> /home/root/.syp_log 
+
+"
+
+#Write the confnet file on server
+ACTION=$(echo "$confnetContent" > $confnetFile)
+
+if [[ $? -ne 0 ]]
+then
+log WARN "Cannot write confnet file for final customisation. Reason: $ACTION"
+else
+chmod +x $confnetFile
+
+fi
+
+}
+
+
+setILO () {
+ILO_hostname="ILO$hostname"
+ILO_pwd="***REMOVED***"
+ILO_ip=$iloipaddress
+ILO_mask=$ilonetmask
+ILO_gw=$gateway
+log INFO "Settings for ilo are: $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname"
+log INFO "Launching the command /usr/sbin/set_ilo.sh $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname"
+Set=$(/usr/sbin/set_ilo.sh $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname)
+log INFO "Results for script: $Set"
+}
+
+
+setProliantMirror () {
+
+#Check if there are two disks
+declare -i Disks
+Results=`hpssacli ctrl all  show config | grep physicaldrive | wc -l`
+Disks=$(echo $Results | sed 's/[^0-9]*//g')
+log INFO "Found $Disks physical disks on system"
+if [[ $Disks -eq 2 ]]; then
+log WARN "Building the mirror"
+Raid=$(hpssascripting -reset -i /home/partimag/HPRAIDTEMPLATES/hpssascripting1.ini)
+if [ $? -ne 0 ]; then
+        ERR="`cat error.ini`"
+        log WARN "The first applied template gives an error: $ERR . I'm going to apply the second one....."
+        Raid=$(hpassascripting -reset -i /home/partimag/HPRAIDTEMPLATES/acuoutput1.ini)
+        if [ $? -ne 0 ]; then
+                log ERROR "I have two physical disks, but I could'nt build a mirror as asked. I'm exit right now"
+                error_exit "I have two physical disks, but I could'nt build a mirror as asked. I'm exit right now"
+        fi
+fi
+log INFO "Mirroring done! $Raid"
+fi
+}
+
+#Functions to configure proliant servers
+
+checkProliant () {
+
+#check if proliant
+check=$(dmidecode -s system-product-name | grep  ProLiant ||  echo 'NOK')
+log WARN "Check Proliant result: $check"
+if [[  "$check" != *"NOK"* ]]; then
+echo "OK"
+else
+echo "NOK"
+fi
+
+}
+
+SEND () {
+
+
+perl -e '
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+my $REST = shift;
+my $uri = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( "PUT", "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+' "$REST" "$URI"
+
+
+}
+
+createMonitorRecord () {
+ status="$1"
+ PK="["$salesOrder"]["$rackPosition"]"
+ URI="http://x.x.x.204/SPOT/provisioning/api/provisioningnotifications/$PK"
+
+                            REST="{
+        \"notifid\":\"$PK\",
+        \"hostname\":\"$hostname\",
+        \"installationip\":\"putty://$clientIP\",
+        \"configuredip\":\"$ipaddress\",
+        \"status\":\"<b>$status</b>\",
+        \"progress\":\"$PROGRESS\",
+        \"image\":\"$image\",
+        \"firmware\":\"$MANUFACTURER\",
+        \"ram\":\"$RAM_tot\",
+        \"cpu\":\"$NUMPROC\",
+        \"diskscount\":\"$DISKCOUNT\",
+        \"netintcount\":\"$NETCOUNT\",
+        \"model\":\"$MODEL\",
+        \"serial\":\"$MACHSERIAL\",
+        \"os\":\"RedHat\"
+        }"
+        SEND 2>&1 >/dev/null
+
+}
+
+LINUX_system () {
+HOST_NAME=$hostname
+        NUMPROC=`cat /proc/cpuinfo | grep "physical id" | sort | uniq | wc -l`
+        MACHSERIAL=`dmidecode -s system-serial-number | grep -v '#'`
+        MANUFACTURER=`dmidecode -s system-manufacturer | grep -v '#'`
+        MODELTYPE=""
+        NETCOUNT=`/usr/share/drbl/bin/get-nic-devs | wc -l`
+        MODEL=`dmidecode -s system-product-name | grep -v '#'`
+        RAM_tot=`grep MemTotal /proc/meminfo | cut -d':' -f2 | cut -d 'k' -f1`
+        RAM_tot=`echo "$RAM_tot" | xargs`
+        RAM_tot=`expr $RAM_tot / 1000 `
+
+        NUMPROC=`echo "$NUMPROC" | xargs `
+        MACHSERIAL=`echo "$MACHSERIAL" | xargs`
+        MANUFACTURER=`echo "$MANUFACTURER" | xargs`
+        MODEL=`echo "$MODEL" | xargs`
+        DISKCOUNT=`lsblk -o NAME -i -d -n -e 1,11 | wc -l`
+}
+
+
+
+setLocale() {
+[ ! -d $output_directory/proc ] && mkdir $output_directory/proc
+[ ! -d $output_directory/sys ] && mkdir $output_directory/sys
+mount -t proc none $output_directory/proc
+mount -t sysfs sys $output_directory/sys
+chroot $output_directory /bin/bash -c "localedef -i en_US -f UTF-8 en_US.UTF-8 && exit"
+umount $output_directory/proc
+umount $output_directory/sys
+}
+
+InstallGrub() {
+log INFO "About to install Grub..."
+grub-install --boot-directory=$output_directory/boot/grub /dev/sda
+
+[ ! -d $output_directory/proc ] && mkdir $output_directory/proc
+[ ! -d $output_directory/sys ] && mkdir $output_directory/sys
+mount -t proc none $output_directory/proc
+mount -t sysfs sys $output_directory/sys
+chroot $output_directory /bin/bash -c "grub-install  /dev/sda && exit" && log INFO "Grub installed ok!!!!" || log ERR "Grub installation had errors"
+umount $output_directory/proc
+umount $output_directory/sys
+
+
+
+}
+
+clean_up() { # Perform pre-exit housekeeping
+  return
+}
+
+error_exit() {
+  echo -e "${PROGNAME}: ${1:-"Unknown Error"}" >&2
+  clean_up
+  exit 1
+}
+
+graceful_exit() {
+  clean_up
+  exit
+}
+
+signal_exit() { # Handle trapped signals
+  case $1 in
+    INT)
+      error_exit "Program interrupted by user" ;;
+    TERM)
+      echo -e "\n$PROGNAME: Program terminated" >&2
+      graceful_exit ;;
+    *)
+      error_exit "$PROGNAME: Terminating on unknown signal" ;;
+  esac
+}
+
+usage() {
+  echo -e "Usage: $PROGNAME [--help] [-pos] [-t] [-ip] [-n] [-g] [-s] [-h] [-iloip] [-ilonm]"
+}
+
+help_message() {
+  cat <<- _EOF_
+  $PROGNAME ver. $VERSION
+  Restore comopletely mondoarchives to new physical/virtual machines using the existing PXE environment
+
+  $(usage)
+
+  Options:
+  --help  Display this help message and exit.
+  -pos Rack position or DHCP ip address of this client
+  -t  Mondoarchive iso image name (in lysis dir)
+  -ip  Ip address to assign after restoration
+  -n  Netmask
+  -g  Gateway
+  -s  Sales order number (if any)
+  -h  Hostname
+  -iloip  Ip address to assign to ilo
+  -ilonm  Netmask for ilo
+
+  NOTE: 
+         - You must be the superuser to run this script.
+         - Only 2 parameters are mandatory:  -pos [Rack position/ Dhcp ip address] -t [ISO name]
+         - Note that if the server is a Proliant, the mirror is automatically built if two disks are found
+
+_EOF_
+  return
+}
+
+
+log() {
+local level=${1?}
+shift
+local code= line="[$(date '+%F %T')] $level: $*"
+if [ -t 2 ]
+then
+case "$level" in
+INFO) code=36 ;;
+DEBUG) code=30 ;;
+WARN) code=33 ;;
+ERROR) code=31 ;;
+*) code=37 ;;
+esac
+echo -e "\e[${code}m${line}\e[0m"
+else
+echo "$line"
+fi >&2
+
+#LOG to web services
+#Create one section for each web service
+
+REST='{"title":"mondoWrapper | '$rackPosition'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
+(
+perl - "$REST"  <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $uri = "http://x.x.x.204/SPOT/provisioning/api/events";
+my $REST = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'POST', "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+_HERE_
+)  2>&1 >/dev/null
+
+if [[ ! -z $rackPosition ]] && [[ ! -z $salesOrder ]]; then createMonitorRecord "$line"; fi
+
+}
+
+check_args() {
+#put here the mandatory params
+
+([[ -z "$ISO"  ]] ) && log ERROR "Some mandatory parameters missing!!!!!" && usage && error_exit "Review the usage"
+ valid_ip $ipaddress && [ "$ERROR" -ne 0 ] && log ERROR "Ip address not valid" && exit 1
+ valid_ip $netmask && [ "$ERROR" -ne 0 ] && log ERROR "Netmask not valid" && exit 1
+ valid_ip $gateway && [ "$ERROR" -ne 0 ] && log ERROR "Gateway not valid" && exit 1
+ [[ ! -f $isoPATH/$ISO ]] && log ERROR "The image $ISO doesn't exist, please check the name" && log INFO "Possible values are:\n`ls $isoPATH | grep iso`" &&  exit 1
+ #check valid client
+
+}
+
+# check IP address function
+valid_ip() {
+ERROR=0
+    oldIFS=$IFS
+    IFS=.
+    set -f
+    set -- $1
+    if [ $# -eq 4 ]
+    then
+      for seg
+      do
+        case $seg in
+            ""|*[!0-9]*) ERROR=1;break ;; ## Segment empty or non-numeric char
+            *) [ $seg -gt 255 ] && ERROR=2 ;;
+        esac
+      done
+    else
+      ERROR=3 ## Not 4 segments
+    fi
+    IFS=$oldIFS
+    set +f
+    return $ERROR
+}
+
+exec_cmd()
+{
+    if [[ ! -z $verbose ]]
+    then
+        log INFO "Running: $1"
+    fi
+    # TODO: is that the right way to do it?
+    $1
+    if [ $? != 0 ]
+    then
+        log ERROR"!! Error while running: $1 !!"
+        error_exit "$PROGNAME: Error running $1 , stderr code $?"
+    fi
+}
+
+
+uncompress_afio()
+{
+    exec_cmd "cd $output_directory"
+    exec_cmd "afio -i -v $ISO_MOUNT_DIR/archives/0.afio.bz2"
+    for afio_file in `ls $ISO_MOUNT_DIR/archives/*.afio.bz2`
+    do
+	log INFO "Decompressing $afio_file ...."
+        exec_cmd "afio -i -v  $afio_file"
+    done
+}
+
+# uncompressing bz2 archives made by mondoarchive
+uncompress_bz2()
+{
+    exec_cmd "cd $output_directory"
+    PROGRESS="65"
+    log INFO "Uncompressing bzip files..... be zen and wait..."
+  
+    find -type f -name '*.z' -exec bunzip2 {} \; 2> /dev/null
+    PROGRESS="75"
+    log INFO "Renaming all *.z.out files...."
+    find -type f -name '*.z.out' | while read f; do mv "$f" "${f%.z.out}"; done
+}
+
+mondoRestore() {
+
+#Unmount unueseful dirs
+ismounted=$(cat /proc/mounts | grep $PACKAGER)
+if [[ "$ismounted" != "" ]]; then
+	exec_cmd "umount $PACKAGER"
+fi
+
+iso_full_backup_path="$1"
+output_directory="$2"
+
+if [[ ! -d $ISO_MOUNT_DIR ]]
+then
+    exec_cmd "mkdir $ISO_MOUNT_DIR"
+fi
+
+# unmounting just in case something else was mounted on it
+if grep -qs "$ISO_MOUNT_DIR" /proc/mounts
+then
+    exec_cmd "umount $ISO_MOUNT_DIR"
+fi
+# backing up full ISO
+exec_cmd "mount -o loop,ro $iso_full_backup_path $ISO_MOUNT_DIR"
+uncompress_afio
+
+
+sleep 1 # workarounds umount: /mnt/iso: device is busy
+exec_cmd "umount $ISO_MOUNT_DIR"
+
+
+#Umount the lysis directory, we don't need anymore
+
+sleep 1
+ismounted=$(cat /proc/mounts | grep $isoPATH)
+if [[ "$ismounted" != "" ]]; then
+	exec_cmd "umount $isoPATH"
+fi
+
+
+
+uncompress_bz2
+exec_cmd "cd /"
+
+log INFO 'MONDOARCHIVE RESTORE Done !!!!'
+
+
+
+}
+# Trap signals
+trap "signal_exit TERM" TERM HUP
+trap "signal_exit INT"  INT
+
+# Check for root UID
+if [[ $(id -u) != 0 ]]; then
+  error_exit "You must be the superuser to run this script."
+fi
+
+# Parse command-line
+while [[ -n $1 ]]; do
+  case $1 in
+    --help)
+      help_message; graceful_exit ;;
+    -pos)
+        rackPosition="$2"
+	log INFO "Rack position / Dhcp ip address: $rackPosition";;
+    -t)
+	ISO="$2"
+      log INFO "mondoarchive iso image: $ISO" ;;
+    -ip)
+	ipaddress="$2"
+      log INFO "Ip address to assign after restoration: $ipaddress" ;;
+    -n)
+	netmask="$2" # You may want to check validity of $2
+      log INFO "Netmask: $netmask" ;;
+    -g)
+	gateway="$2"   # You may want to check validity of $2
+      log INFO "Gateway: $gateway" ;;
+    -s)
+	salesOrder="$2" # You may want to check validity of $2
+      log INFO "Sales order number (if any): $salesOrder" ;;
+    -h)
+	hostname="$2"   # You may want to check validity of $2
+      log INFO "Hostname: $hostname" ;;
+    -iloip)
+	iloipaddress="$2"
+      log INFO "Ip address to assign to ilo: $iloipaddress" ;;
+    -ilonm)
+        ilonetmask="$2"
+      log INFO "Netmask for ilo: $ilonetmask" ;;
+    -* | --*)
+      usage
+      error_exit "Unknown option $1" ;;
+    *)
+      log INFO "Argument $1 to process..." ;;
+  esac
+  shift 2
+done
+
+check_args
+
+log INFO "Set defaults value if not specified in command line..."
+# Set the defaults values
+[[ -z "$hostname" ]] && hostname="nagrasrv01"                                                   && log INFO "Set the hostname to '$hostname'"
+[[ -z "$ipaddress" ]] && ipaddress=$(echo "10.0.133.$((RANDOM%=255))")                          && log INFO "Set the ip address to '$ipaddress'"
+[[ -z "$netmask" ]] && netmask="255.255.255.0"                                                  && log INFO "Set the netmask to '$netmask'"
+[[ -z "$gateway" ]] && gateway="10.0.133.252"                                                   && log INFO "Set the gateway to '$gateway'"
+[[ -z "$ilohostname" ]] && ilohostname="ILO$hostname"                                           && log INFO "Assuming ilo hostname for proliant server equal to '$ilohostname'"
+[[ -z "$iloipaddress" ]] && iloipaddress=$(echo "10.0.133.$((RANDOM%=255))")                    && log INFO "Assuming ilo ip address for proliant server equal to '$iloipaddress'"
+[[ -z "$ilonetmask" ]] && ilonetmask="255.255.255.0"                                            && log INFO "Assuming ilo netmask for proliant server equal to '$ilonetmask'"
+[[ -z "$salesOrder" ]] && salesOrder="99999999"                                                 && log INFO "Set sales order to '$salesOrder'"
+
+
+# Main logic
+
+# contact time server and set the correct soft and hw time
+syncTime
+
+
+clientIP="$(ifconfig | grep -A 1 'eth0' | tail -1 | cut -d ':' -f 2 | cut -d ' ' -f 1)"
+image=$ISO
+iso_full_input_path="$isoPATH/$ISO"   # You may want to check validity of $2
+ # Workaround for NFS file STALE
+#        while true; do mount -o remount,rw -a; sleep 10; done &
+
+# Config proliant servers
+PROGRESS=5
+log INFO "Checking if the server is a proliant server...."
+proliant=$(checkProliant)
+if [[ "$proliant" == "OK" ]]; then
+#Set ILO configuration
+PROGRESS=10
+log INFO "Set the ILO ip"
+
+setILO
+#do the mirror!
+PROGRESS=15
+log INFO "Creating the mirror if needed"
+setProliantMirror
+fi
+
+#the SSH execution is assured in the function
+PROGRESS=20
+log INFO "Executing Linux Inventory"
+#inventoryLinux
+LINUX_system
+
+
+#mount the iso to explore partitions list
+PROGRESS=25
+log INFO "Mounting the iso $iso_full_input_path ....."
+mount $iso_full_input_path $ISO_MOUNT_DIR
+
+PROGRESS=30
+log INFO "Extracting additional files ..."
+tar zxvf $ISO_MOUNT_DIR/images/all.tar.gz  -C /tmp
+umount $ISO_MOUNT_DIR
+PROGRESS=35
+log INFO "Checking disk configuration"
+
+SDA=`cat /tmp/tmp/mountlist.txt | grep sda`
+        if [[ "$SDA" == "" ]]; then
+                log INFO "Creating symbolic link to c0d0"
+                SDA="c0d0"
+                mkdir /dev/cciss
+                ln -s /dev/sda /dev/cciss/c0d0
+                ln -s /devsda1 /dev/cciss/c0d0p1
+                ln -s /dev/sda2 /dev/cciss/c0d0p2
+                SDA="/dev/cciss/c0d0"
+                SDA1="/dev/cciss/c0d0p1"
+                SDA2="/dev/cciss/c0d0p2"
+        else
+                SDA="/dev/sda"
+                SDA1="/dev/sda1"
+                SDA2="/dev/sda2"
+        fi
+
+#first create partitions
+PROGRESS=40
+log INFO "About to partition hdisk"
+fdisk $SDA  < $mount_directory/fdisk.txt  2>&1 >/dev/null
+# call partprobe to get new layout "
+PROGRESS=45
+log INFO "Informing the kernel on partition table changes.."
+partprobe
+#Run I want my lvm to create lvm layout
+PROGRESS=50
+log INFO "Creating LVM layout"
+i_want_my_lvm  $SDA1 $SDA2 2>&1 >/dev/null
+#Mount all partitions
+PROGRESS=55
+log INFO "Mount all new created partitions"
+mount_me
+#exec_cmd "mount -t nfs $nfs_server $mount_directory"
+mondoRestore  $iso_full_input_path  $output_directory
+
+# Modify fstab
+PROGRESS=85
+log INFO "Adjust /boot partition in fstab definition ...."
+cp $output_directory/etc/fstab $output_directory/etc/fstab.old
+UUID=`cat $output_directory/etc/fstab | grep "boot" | awk '{print $1}'`
+sed  -i "s*$UUID*$SDA1*g"  $output_directory/etc/fstab
+
+# Set locale
+PROGRESS=90
+log INFO "Set local on provisioned machine"
+setLocale
+PROGRESS=95
+# Todo: change networking setup
+log INFO "Setting up basic network configuration"
+createConfnet
+log INFO "Running configuration file in chrooted environment"
+runConfnet
+
+# Install Grub
+InstallGrub 
+
+#unmount /mnt/RESTORING
+log INFO "Unmounting the partitions"
+cd /tmp # Just in case
+unmount_me
+
+PROGRESS=100
+# Reboot to installed image
+log INFO "GOOD: I'm rebooting ..... (End of restore $iso_full_input_path . Have a nice day)"
+ shutdown -r now
+
+
+
+graceful_exit
+

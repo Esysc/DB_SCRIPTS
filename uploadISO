@@ -1,0 +1,124 @@
+#!/bin/bash
+
+isoPATH=$2
+isoFILE=$1
+#Define the web services where to send events
+#the form is WEB1, WEB2, WEB(n)
+#Add the perl section for each service in 'log' function
+
+WEB1="http://chx-sysprod-01/RESTGwy/portal.php/writeevent"
+
+
+
+#Function log for better printing
+
+log() {
+local level=${1?}
+shift
+local code= line="[$(date '+%F %T')] $level: $*"
+if [ -t 2 ]
+then
+case "$level" in
+INFO) code=36 ;;
+DEBUG) code=30 ;;
+WARN) code=33 ;;
+ERROR) code=31 ;;
+*) code=37 ;;
+esac
+echo -e "\e[${code}m${line}\e[0m"
+else
+echo "$line"
+fi >&2
+
+#LOG to web services
+#Create one section for each web service
+
+REST="$WEB1?title=uploadISO | $rackPosition&text=$line"
+
+(
+perl - "$REST"  <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $WEB = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'GET', "$WEB" );
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+_HERE_
+)  > /dev/null 2>&1
+
+
+REST='{"title":"uploadISO | '$rackPosition'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
+
+(
+perl - "$REST"  <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $uri = "http://x.x.x.204/SPOT/provisioning/api/events";
+my $REST = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'POST', "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+_HERE_
+)  2>&1 >/dev/null
+
+
+}
+
+file=$(basename $isoFILE)
+
+log INFO "Starting to upload file $file...."
+
+if [[ -f  $isoFILE ]]; then
+scp $isoFILE $isoPATH
+if [ $? -ne 0 ]; then
+log ERROR "An error occured"
+exit 1
+else
+log INFO "$file uploaded successfully in $isoPATH dir"
+exit 0
+fi
+else
+log ERROR "Please check name and path given. The file was not found "
+fi
+exit 1

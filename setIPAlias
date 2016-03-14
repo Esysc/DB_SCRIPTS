@@ -1,0 +1,151 @@
+#!/bin/bash 
+
+
+#
+#
+# setIPAlias v 1.1
+#aimed to set remotely alias address in CTRL network
+#it must be run only on mgt-ai
+
+log() {
+local level=${1?}
+shift
+local code= line="[$(date '+%F %T')] $level: $*"
+if [ -t 2 ]
+then
+case "$level" in
+INFO) code=36 ;;
+DEBUG) code=30 ;;
+WARN) code=33 ;;
+ERROR) code=31 ;;
+*) code=37 ;;
+esac
+echo -e "\e[${code}m${line}\e[0m"
+else
+echo "$line"
+fi >&2
+
+REST='{"title":"setIPAlias ","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
+(
+perl - "$REST"  <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $uri = "http://x.x.x.204/SPOT/provisioning/api/events";
+my $REST = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'POST', "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+_HERE_
+)  2>&1 >/dev/null
+
+
+}
+
+# check IP address function
+valid_ip() {
+ERROR=0
+    oldIFS=$IFS
+    IFS=.
+    set -f
+    set -- $1
+    if [ $# -eq 4 ]
+    then
+      for seg
+      do
+        case $seg in
+            ""|*[!0-9]*) ERROR=1;break ;; ## Segment empty or non-numeric char
+            *) [ $seg -gt 255 ] && ERROR=2 ;;
+        esac
+      done
+    else
+      ERROR=3 ## Not 4 segments
+    fi
+    IFS=$oldIFS
+    set +f
+    return $ERROR
+}
+
+# Usage function
+usage () {
+log INFO "usage $0
+-ip [ip address]
+-n [netmask]
+"
+exit 1
+}
+
+check_args() {
+#put here the mandatory params
+ valid_ip $ipaddress && [ "$ERROR" -ne 0 ] && log ERROR "Ip address not valid" && exit 1
+ valid_ip $netmask && [ "$ERROR" -ne 0 ] && log ERROR "Netmask not valid" && exit 1
+
+}
+
+
+
+if [ $# -ne 4 ]; then
+usage
+fi
+
+while :
+do
+    case "$1" in
+          -ip )
+          ipaddress="$2"
+          shift 2
+          ;;
+      -n )
+          netmask="$2" # You may want to check validity of $2
+          shift 2
+          ;;
+*)      break
+;;
+           esac
+done
+
+
+CIDR=$(ipcalc -b $ipaddress/$netmask | grep Netmask |awk -F " = " '{print $2}')
+eth=`cat /proc/net/dev | awk -F ":" '{print $1}' | grep -v lo | grep -v Inter- | grep -v face | grep -v eth1 | grep -v eth0 | grep eth`
+int_active=`ifconfig | awk '{print $1}' | grep $eth | tail -1`
+index=$(echo $int_active |awk -F ":" '{print $2}')
+newindex=`expr $index + 1`
+int_to_use=$(echo $int_active |awk -F ":" '{print $1}')":"$newindex
+if [ $? -eq 0 ]; then
+        log INFO "Found free interface $int_to_use"
+else
+        log WARN "Something wrong, I cannot retrieve a free interface on mgt"
+        exit 299
+fi
+`ip addr add $ipaddress/$CIDR dev eth2 label $int_to_use`
+if [ $? -eq 0 ]; then
+        log INFO "Successfully set $int_to_use to $ipaddress/$CIDR on mgt"
+	exit 0
+else
+        log WARN "Something wrong, I cannot set the alias ip on mgt"
+        exit 299
+fi
+
+
+
+

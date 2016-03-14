@@ -1,0 +1,160 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# runCommader - Run the command as user
+
+# Copyright 2015, root <root@drbl01>
+# All rights reserved.
+
+# Usage: runCommader [-h|--help] [-u|--user] [-c|--command]
+
+# Revision history:
+# 2015-06-04 Created by template_generator ver. 3.3
+# ---------------------------------------------------------------------------
+
+PROGNAME=${0##*/}
+VERSION="0.1"
+
+clean_up() { # Perform pre-exit housekeeping
+  return
+}
+
+error_exit() {
+  echo -e "${PROGNAME}: ${1:-"Unknown Error"}" >&2
+  clean_up
+  exit 1
+}
+
+graceful_exit() {
+  clean_up
+  exit
+}
+
+signal_exit() { # Handle trapped signals
+  case $1 in
+    INT)
+      error_exit "Program interrupted by user" ;;
+    TERM)
+      echo -e "\n$PROGNAME: Program terminated" >&2
+      graceful_exit ;;
+    *)
+      error_exit "$PROGNAME: Terminating on unknown signal" ;;
+  esac
+}
+
+usage() {
+  echo -e "Usage: $PROGNAME [-h|--help] [-u|--user] [-c|--command]"
+}
+
+help_message() {
+  cat <<- _EOF_
+  $PROGNAME ver. $VERSION
+  Run the command as user
+
+  $(usage)
+
+  Options:
+  -h, --help  Display this help message and exit.
+  -u, --user  User on the system to run as
+  -c, --command  command to execute
+
+_EOF_
+  return
+}
+
+log() {
+local level=${1?}
+shift
+local code= line="[$(date '+%F %T')] $level: $*"
+if [ -t 2 ]
+then
+case "$level" in
+INFO) code=36 ;;
+DEBUG) code=30 ;;
+WARN) code=33 ;;
+ERROR) code=31 ;;
+*) code=37 ;;
+esac
+echo -e "\e[${code}m${line}\e[0m"
+else
+echo "$line"
+fi >&2
+
+REST='{"title":"'$COMMAND'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
+(
+perl - "$REST"  <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $uri = "http://x.x.x.204/SPOT/provisioning/api/events";
+my $REST = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'POST', "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+_HERE_
+)  2>&1 >/dev/null
+}
+
+
+# Trap signals
+trap "signal_exit TERM" TERM HUP
+trap "signal_exit INT"  INT
+
+
+
+# Parse command-line
+while :
+do
+  case "$1" in
+    -h | --help)
+      help_message; graceful_exit ;;
+    -u | --user)
+	 user="$2"
+         shift 2
+	 ;;
+    -c | --command)
+	 shift 1
+         COMMAND="$*" # You may want to check validity of $2
+         shift 2
+          ;;
+     *)
+	if [ $? -ne 0 ]; then
+		usage
+		error_exit "not enough arguments or wrong options"
+	fi
+
+       break
+	;;
+  esac
+done
+
+# Main logic
+
+SUDO=$(which su)
+if [[ ! -z "$user" ]]; then
+        USER="$SUDO -l $user -c "
+fi
+log INFO "$($USER  \"$COMMAND\")"
+
+
+graceful_exit
+
