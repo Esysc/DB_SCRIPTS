@@ -11,71 +11,16 @@
 #ksh_version    :Version M-11/16/88f
 #============================================================================
 
-#@(#)------------------------------------------------------
-#@(#) General Information
-#@(#)   Name      : nimWrapper
-#@(#)   Purpose   : Aim to manage nim jobs
-#@(#)   Version   : 2.2
-#@(#)   Author    : A. Cristalli
-#@(#)------------------------------------------------------
-#@(#) Usage
-#@(#)   Basic usage to restore a mksysb:
-#@(#)     nimWrapper  -a [aixtz] -c [nimclient] -i [image name]
-#@(#)
-#@(#)   Check if a nim client exists and is connected to serial console:
-#@(#)     nimWrapper -c [nimclient]
-#@(#)
-#@(#)   Boot in maintenance or diag mode:
-#@(#)     nimWrapper -c nimclient -i [diag|maint_boot] -spot [spot name]|[if empty return a list of spots]
-#@(#)
-#@(#)   Configure a redundant interface (bond) in dhcp:
-#@(#)     nimWrapper -c '<dev_1>..<dev_n>' -D [-N <hostname>] [-P]
-#@(#)
-#@(#)   Complete example of usage
-#@(#)     nimWrapper -a [aixtz] -c [nimclient] -d [disksize(GB)] -g [default gateway] -h [hostname] -i [image name] -ip [ip address] -m [mirror:0|1] -n [netmask] -p [paging size] -s [sales order number] -boot [normal|factory]  -nocheck (for VMs or delayed tasks)
-
-#@(#)
-#@(#)
-#@(#)------------------------------------------------------
-#@(#) Parameters
-#@(#)   -a        : Define the time zone to apply (POSIX)
-#@(#)   -c        : Define the nim client hostname
-#@(#)   -d        : Define the disk (rootvg) capacity (GB)		(optional) 
-#@(#)   -g        : Define the gateway to apply				(optional)
-#@(#)   -h        : Define the hostname to apply			(optional)
-#@(#)   -i        : Set the mksysb image to use
-#@(#)   -ip       : Define the final ip to set				(optional)
-#@(#)   -m        : Decide if mirror rootvg or not 0->not 1-> yes	(optional)	default "do nothing"
-#@(#)   -n        : Define  the netmask to apply			(optional)
-#@(#)   -p        : Define the paging size to apply (GB)		(optional)
-#@(#)   -s        : Set the sales order this client belong to 		(optional)
-#@(#)   -boot     : Auto Poweron SMS config normal/factory		(optional)	default "do nothing"
-#@(#)   -nocheck  : Check if the nim client is exists andconnected	(optional)	default "do nothing"
-#@(#)   -M        : Set bond mode. 0 to 6 (default: 1)
-#@(#)   -e        : Set ethtool options
-#@(#)   -r        : Change config file(s) only (no action)
-#@(#)   -h        : Display this help
-#@(#)   -x        : Debug Mode
-#@(#)------------------------------------------------------
-#@(#) Exit Codes
-#@(#)  255        : Syntax Error
-#@(#)    0        : Succeed
-#@(#)    1        : Failed
-#@(#)------------------------------------------------------
-
-
 typeset APISERVER="spmgt.my.comp.ltd"
 typeset EXPECT="/usr/bin/expect"
 typeset scriptName="$0"
 typeset LSNIM=$(which lsnim)
 typeset expectserver="spmgt.my.comp.ltd"
 
-#Determine the nim ip address (in the case we have more than one nim)
-#this value is than use to set SMS nim server value to boot of
-NIMNET=$($LSNIM -l Network1 | grep net_addr | awk  -F "=" '{print $2}' | cut -c 1-8)
-nimserver=$(ifconfig -a | grep $NIMNET | cut -d\  -f2)
 
-
+#Determine the nim ip address
+nimserver=$(ifconfig -a | grep 192.168.10 | awk '{print $2}')
+#echo "This nim IP address is $nimserver"
 nimnetmask="255.255.255.0"
 nocheck=0
 #Set nim hosts file for clients
@@ -405,21 +350,46 @@ checkMenu () {
   address=$(echo "$line" | awk -F ":" '{print $1}')
   port=$(echo "$line" | awk -F ":" '{print $2}')
  log INFO  "Cyclades information: $address:$port"
-  while true
-  do
   OUTPUT=$($EXPECT  -c "
         #exp_internal 1
-        spawn  telnet $address $port
+	set send_slow {1 .1}
+	set sig 400
+	catch {spawn -noecho telnet $address $port}
         expect \" *\"
         send \\n
         expect \"  \"
         send \\n
         expect \" *\"
         send \\n
+	send \\n
+	send \\n
         send \"\\$?\\r\"
+	expect {
+         \" DEVICE LOCKED\" { set sig 400}
+         \"onnected\" {
+                 send \\n;
+                 }
+         \"ogin: \" {
+                 set sig 400;
+                 }
+         }
+         send \\n;
+         expect {
+                \"out.\"      {
+                            set sig 401 }
+                \"User ID: \" { set sig 401 }
+                \"ogin: \" {
+                 set sig 401;
+                 }
+                \"S1> \" {  send 99\\n; set sig 401 }
+                }
+	exit \$sig
+	close
+	expect eof
   " )
-  [ $? -eq 0 ] && break || echo "retrying ..."
-  done
+  RET=$?
+  [[ $RET -eq 144 ]] && log WARN "I can't detected a IBM client on $nimclient . Check if the telnet connection is not owned by something else" && exit $RET
+
   word="type"
 OLDIFS="$IFS"
 IFS=$'\n' # bash specific
@@ -429,16 +399,18 @@ IFS=$'\n' # bash specific
     test "${line#*$word}" != "$line" &&  tmp=${line#*:}   &&  break;
    done #<<< "$OUTPUT"
  IFS="$OLDIFS"
+  isPower8="Power7"
   POWERON=8
   ETHERNET=6
   POWER8="8284 8286 8247 8335 8348 8408 9119"
         for MODEL in $POWER8
         do
 log INFO "Looping between power8 models..... $MODEL"
-                test "${tmp#*$MODEL*}" != "$tmp" &&  POWERON=7 && ETHERNET=4 && break
+                test "${tmp#*$MODEL*}" != "$tmp" &&  POWERON=7 && ETHERNET=4 && isPower8="Power8" && break
         done
   # Return 7 or 8 following the model (if found 828 in the model type)
   log WARN  "Menu choiche for power on is $POWERON and for boot ethernet choiche $ETHERNET . The complete banner output from asmi: $OUTPUT"
+  [[ $RET -eq 145 ]] && log INFO "Good! A IBM client has been detected and has been identified as a $isPower8. I'm going to poweron .... " 
 }
 
 
@@ -468,6 +440,7 @@ ERROR=0
     return ERROR
 }
 
+
 sshExe() {
 # $1 client ip
 #
@@ -483,6 +456,9 @@ fi
 #Power on, set bootip ip address on client and start network for install
 
 powerOnAndInstall () {
+#	Expect path on remote server
+#	This expect function need to be  executed on a remote linux server to avoid coredump
+EXPECT=/usr/bin/expect
 line=$(echo  "$CYCLADES" | grep $nimclient | awk '{print $2}')
 address=$(echo $line | awk -F ":" '{print $1}')
 port=$(echo $line | awk -F ":" '{print $2}')
@@ -527,7 +503,7 @@ send -s -- "1\r"
                 ;;
 esac
 log INFO "About to power ON the server and set SMS to boot on network...... "
-sshExe $expectserver /usr/bin/expect -c <<EXPECT
+sshExe $expectserver $EXPECT  <<EXPECT  > /dev/null 2>&1
 set send_slow {1 .1}
 catch {spawn -noecho telnet $address $port}
 set timeout 10
@@ -564,24 +540,21 @@ expect "~."        { send "\\n" }
 puts "\\n\\nPower On Successful\\n"; 
 puts "\\n\\nWaiting for SMS menu\\n";
 set timeout -1
-puts "\\n\\nSleeping for 120 seconds (about 2 minutes)\\n";
-sleep 120
+puts "\\n\\nSleeping for 60 seconds \\n";
+sleep 60
 puts "\\n\\nI'm getting up now,  spawning sms commands...\\n";
 send  \\r
 send  \\r
 send  \\r
 $acceptLicense
-expect -exact "     Memory      Keyboard     "
+expect  "     Memory      Keyboard     "
 sleep .1
 send -s -- "1"
-expect -exact "Network     SCSI     "
-sleep .1
-send -s -- "1"
-expect -exact " Type menu item number and press Enter:"
-sleep .1
+expect  " Type menu item number and press Enter:"
+sleep 1
 send -s -- "2\\r"
 expect -exact ""
-sleep .1
+sleep 1
 send -s -- "a"
 expect -exact "*"
 sleep .1
@@ -662,7 +635,7 @@ expect -exact " Type menu item number and press Enter or select Navigation key:"
 sleep .1
 send -s -- "1\\r"
 puts "\\n\\nSuccess! the server is booting now...\\n";
-sleep 240
+sleep 120
 send "\\035"
 expect "elnet> "    { send quit\\n }
 expect eof
@@ -707,52 +680,17 @@ checkClient () {
 checkRack () {
 # exit 144 => no connection
 # exit 145 => asmi presents
-getEnv
 checkClient
 if [ $? -eq 1 ];then
 exit 1
 fi
 #echo "nocheck $nocheck"
 if [ $nocheck -eq 0 ];  then
-line=$(echo  "$CYCLADES" | grep $nimclient | awk '{print $2}')
-address=$(echo $line | awk -F ":" '{print $1}')
-port=$(echo $line | awk -F ":" '{print $2}')
-log INFO "Checking if IBM machine is connected on $nimclient"
-/usr/local/bin/expect >/dev/null 2>&1 <<EXP
-set send_slow {1 .1}
-catch {spawn -noecho telnet $address $port}
-set timeout 2
-#Default value is 300
-set sig 400
-expect {
-         " DEVICE LOCKED" { puts "*********locked"; set sig 400}
-         "onnected" {
-                 send \n;
-                 }
-         "ogin: " {
-                 puts "**** already active exiting";set sig 400;
-                 }
-         }
-         send \n;
-         expect {
-                "out."      {
-                            puts "The server is connected"; set sig 401 }
-                "User ID: " { puts "The server is connected"; set sig 401 }
-                "ogin: " {
-                 puts "**** already active exiting"; set sig 401;
-                 }
-                "S1> " { puts "The server is connected"; send 99\n; set sig 401 }
-                }
-puts "exit signal is \$sig"
-#send_error "\$sig"
-exit \$sig
-close
-expect eof
-EXP
-RET=$?
-[[ $RET -eq 144 ]] && log WARN "I can't detected a IBM client on $nimclient . Check if the telnet connection is not owned by something else"
-[[ $RET -eq 145 ]] && log INFO "Good! A IBM client has been detected"
-#echo $RET
+checkMenu
+log WARN "Power on the client $nimclient in $bootClient mode"
+PROGRESS=8 && log WARN "This script is started in background to avoid to wait for the end (it takes around 4 minutes)"
+powerOnAndInstall &
+
 fi
 }
 
@@ -928,20 +866,10 @@ PROGRESS=1
 getEnv
 if [ $nocheck -eq 0 ]; then
         checkRack
-        if [ $RET -eq 144 ]; then
-                exit $RET
-        fi
-	checkMenu
 fi
 # check the arguments
 # Please note that data is not verified
 check_args
-if [ $nocheck -eq 0 ]; then
-        checkRack
-        if [ $RET -eq 144 ]; then
-                exit $RET
-        fi
-fi
 
 
 # Check The existence of related spot and obtain the resource name
@@ -1771,14 +1699,8 @@ ret=$?
 if [ $ret -ne 0 ]; then
 PROGRESS=100 && log ERROR "An error occured launching the nim -o bosinst command"
 exit $ret
-else
-if [ ! -z "$bootClient" ]; then
-log WARN "Power on the client $nimclient in $bootClient mode"
-PROGRESS=8 && log WARN "This script is started in background to avoid to wait for the end (it takes around 4 minutes)"
-powerOnAndInstall &
 fi
-fi
-
+log INFO "Good, BOS install is scheduled now, waiting for client to  boot..."
 
 # check mksysb installation
 # I cannot build a function here because backgrounding brokes the script
