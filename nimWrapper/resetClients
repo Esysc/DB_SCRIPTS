@@ -1,0 +1,26 @@
+#!/usr/bin/ksh
+# Reset a NIM client.
+ 
+if [[ "$1" = "" ]] ; then
+  echo "No argument provided, going to reset all nim clients. press Enter to continue or ctrl^C to stop this script"
+	read x
+  clients=$(lsnim -t standalone  | grep rack | awk '{print $1}')
+  for client in $clients
+	do
+	     if  lsnim -l $client > /dev/null 2>&1 ; then
+		echo "Resetting $client ............"
+		nim -o reset -F $client
+		echo "Deallocating $client ........."
+		nim -Fo deallocate -a subclass=all $client
+	     else
+	        echo "$client , Not a valid NIM client!?"
+	     fi
+	done
+else
+  if lsnim -l $1 > /dev/null 2>&1 ; then
+    nim -o reset -F $1
+    nim -Fo deallocate -a subclass=all $1
+  else
+    echo Not a valid NIM client!?
+  fi
+fi

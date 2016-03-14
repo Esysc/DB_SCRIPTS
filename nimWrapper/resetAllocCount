@@ -1,0 +1,1 @@
+ /usr/lpp/bos.sysmgt/nim/methods/m_chattr -a alloc_count=0 $1
