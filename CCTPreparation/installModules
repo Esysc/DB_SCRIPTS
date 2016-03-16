@@ -15,7 +15,7 @@ PROGNAME=${0##*/}
 VERSION="0.1"
 ## Global Variables
 
-typeset APISERVER="x.x.x.204 # IP address of the api server
+typeset APISERVER="x.x.x.204 # IP address of the api server"
 log() {
   local level=${1?}
   shift
