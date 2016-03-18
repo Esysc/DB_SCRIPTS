@@ -96,7 +96,7 @@ sshExe() {
   #
   # $2 command or function
   log INFO "Executing sshpass -p $password ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t root@$1  $2"
-  sshpass -p $password ssh -f -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t root@$1 " $2" 
+  sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t root@$1 " $2" 
   if [[ $? -ne 0 ]]
   then
     log ERROR "Execution Error! May be ssh connection problem or execution of command'$2' issue. I will exit now."
@@ -121,13 +121,6 @@ copyModules () {
   if [ -e $module ];then
     #good , the module has been found
     
-    #Test if the remote host can be reached
-    check=$(nmap -PN -p ssh $host | grep 'open')
-    if [[ $check ==  "" ]]; then
-      log ERROR "Cannot connect to $host, ssh port not open or host not reachable. Please, check  ip address, routing, or ssh service available on remote host. "
-      error_exit
-    fi
-    #Good, all tests pased
     #Start copying..........
     scpExe $host $module $baseDir
     
@@ -142,39 +135,32 @@ copyModules () {
 
 remoteInstall () {
   
-  #Test if the remote host can be reached
-  check=$(nmap -PN -p ssh $host | grep 'open')
-  if [[ $check ==  "" ]]; then
-    log ERROR "Cannot connect to $host, ssh port not open or host not reachable. Please, check  ip address, routing, or ssh service available on remote host. "
-    error_exit
-  fi
   baseDir="/home/operator/delivery"
   baseName=$(basename $module)
   targetDir="$baseDir/$baseName"
-  
+  install_script=$targetDir/install_script.sh
 CMD="
 cd $targetDir
-echo '#!/usr/bin/bash' > install_script.sh
-echo 'source /home/root/.bashrc' >> install_script.sh
-echo 'echo y | InstallSofts   $service $bundle $user' >> install_script.sh
-chmod +x install_script.sh
+echo '#!/usr/bin/bash' > $targetDir/install_script.sh
+echo 'source /home/root/.bashrc' >> $targetDir/install_script.sh
+echo 'echo y | InstallSofts   $service $bundle $user' >> $targetDir/install_script.sh
+chmod +x $targetDir/install_script.sh
 "
   
   
-log INFO "Going to create le script for installation.."
+log INFO "Going to create the script for installation.."
 
   sshExe  $host "$CMD"
-
+  sleep 3
 log INFO "Going to install $module on $host .... "
 
 CMD="
 cd $targetDir
-./install_script.sh | tee install_$baseName.log
-rm -f install_script.sh
+$targetDir/install_script.sh 
 "
   sshExe  $host "$CMD"
 
-log INFO "Installation terminated, check the install_$baseName.log files in $targetDir directory"
+log INFO "Installation terminated, check the $targetDir/installation.log file."
 }
 
 clean_up() { # Perform pre-exit housekeeping
@@ -305,6 +291,12 @@ done
 
 test_args
 # Main logic
+ #Test if the remote host can be reached
+  check=$(nmap -PN -p ssh $host | grep 'open')
+  if [[ $check ==  "" ]]; then
+    log ERROR "Cannot connect to $host, ssh port not open or host not reachable. Please, check  ip address, routing, or ssh service available on remote host. "
+    error_exit
+  fi
 
 getHostname
 copyModules

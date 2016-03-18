@@ -1,0 +1,88 @@
+# File: /etc/hosts				    	#
+# Version update: October 2010			    	#
+# Author: System Production			    	#
+# IP Address      Hostname(s)       	# Comments  	#
+
+127.0.0.1       loopback localhost      						
+
+# CTRL Network Servers
+10.0.142.1	cas01 sas01
+10.0.142.2	cas02 sas02
+10.0.142.7	nsm01
+10.0.142.8	nsm02
+10.0.142.9	ims01
+10.0.142.10	ims02
+10.0.142.111	dvs01
+10.0.142.112	dvs02
+10.0.142.113	rtm01
+10.0.142.117	itm01
+10.0.142.31	mgt01
+10.0.142.32	mgt02
+
+# CTRL Network Peripherals
+10.0.142.151	ecb01 
+10.0.142.152	ecb02 
+10.0.142.161	cps01
+10.0.142.162	cps02
+10.0.142.201	emb01
+10.0.142.202	emb02 
+10.0.142.222	mdi02
+
+# IDTV Network Servers
+10.0.142.3	idtvsrv01 cms01
+10.0.142.4	idtvsrv02 cms02
+10.0.142.5	sms01
+10.0.142.6	sms02
+10.0.142.41	vs01
+10.0.142.42	vs02
+
+# HACMP Resources and DBs
+10.0.142.11	rtmsoft
+10.0.142.12	imssoft
+10.0.142.13	nsmsoft
+10.0.142.14	embsoft drumon
+10.0.142.15	itmsoft
+10.0.142.19	audsoft
+10.0.142.20	idtvsrvon
+10.0.142.21	nbesoft
+10.0.142.22	maesoft
+10.0.142.23	dvssoft
+10.0.142.24	emcsoft
+10.0.142.200	imsdb1_ip
+10.0.142.201	imsdb2_ip
+10.0.142.205	sasdb1_ip
+10.0.142.210	casdb1_ip
+10.0.142.211	casdb2_ip
+10.0.142.215	cardb1_ip
+10.0.142.220	idtvdb1_ip idtvdbon
+10.0.142.225	onldb1_ip
+
+# SAN
+10.0.142.101	san01
+10.0.142.102	san02
+10.0.142.25	fsw01
+10.0.142.26	fsw02
+
+# NETWORK Equipments
+10.0.142.231	esw01
+10.0.142.232	esw02
+10.0.142.240	asi01
+10.0.142.242	ntp01 time
+10.0.142.243	acs01
+10.0.142.250	vpn01
+10.0.142.252	fw01 router01
+10.0.142.253	fw01mstmgt             # FW Cluster Master
+10.0.142.254	fw01slvmgt	       # FW Cluster Slave
+10.0.142.255    broadcast broadcasthost
+
+# ENTT Network
+192.168.2.151	ecb01.entt 
+192.168.2.152	ecb02.entt
+192.168.2.161	cps01.entt
+192.168.2.162	cps02.entt
+192.168.2.201	emb01.entt
+192.168.2.202	emb02.entt
+192.168.2.231	esw01.entt
+192.168.2.232	esw02.entt
+192.168.2.252	fw01.entt router01.entt
+10.0.142.221 	 mdi01 mdi01.ctrl 
