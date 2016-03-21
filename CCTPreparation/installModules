@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash  
 # ---------------------------------------------------------------------------
 # installModules - Aim to install NSE , NGE, NRE and eventually NSM before to start the business environment managed by the CCT console.
 
@@ -13,6 +13,11 @@
 
 PROGNAME=${0##*/}
 VERSION="0.1"
+
+## Parse prog name to find an ID if executed from SPOTDB
+
+ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
+
 ## Global Variables
 
 typeset APISERVER="x.x.x.204" # IP address of the api server
@@ -34,10 +39,12 @@ log() {
   else
     echo "$line"
   fi >&2
-  
-  REST='{"title":"'`basename $0`' | '$rackPosition'","content":"'$line'","userid":"'$(whoami)'","date":"'$(date)'"}'
+  if [[ "$ID" == "" ]]; then
+    REST='{"title":"'`basename $0`' | '$rackPosition'","content":"'$line'","userid":"'$(whoami)'","date":"'$(date)'"}'
+    URI="http://$APISERVER/SPOT/provisioning/api/events"
+    METHOD="POST"
   (
-perl - "$APISERVER" "$REST"  <<'_HERE_'
+perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
 use integer;
 use POSIX qw(strftime);
 use Backticks;
@@ -56,20 +63,29 @@ use HTTP::Cookies;
 use HTTP::Request;
 use LWP;
 use File::Path qw{mkpath};
-my $APISERVER = shift;
-my $uri = "http://$APISERVER/SPOT/provisioning/api/events";
+my $uri = shift;
 my $REST = shift;
+my $METHOD = shift;
 my $lwp = LWP::UserAgent->new(
                         timeout               => 10,
 );
-my $req = HTTP::Request->new( 'POST', "$uri" );
+my $req = HTTP::Request->new( "$METHOD", "$uri" );
 $req->content($REST);
 my $resp = $lwp->request($req);
 print $req->as_string;
 #print Dumper $resp;
 _HERE_
   )  >/dev/null 2>&1
-  
+
+  else
+    REST="content=$line&commandid=$ID"
+    URI="http://$APISERVER/SPOT/provisioning/includes/logWrapper.php"
+    METHOD="POST"
+     curl -i \
+    -H "UserAgent: perl" \
+    -X $METHOD --data "$REST" $URI --trace-ascii /dev/stdout  >/dev/null 2>&1
+  fi
+
   
 }
 

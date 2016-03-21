@@ -165,7 +165,7 @@ foreach  $f  ( @recursive ) {
 		my $Scontent = $string->{scriptcontent};
 		my $Sinterpreter = $string->{interpreter};
 		my $Sversion = $string->{version};
-		push(@scriptName, $file_path.$f->{exesequence}."_SO_".$f->{salesorder}."_rack".$f->{rack}."_shelf".$f->{shelf}."_".$Sname);
+		push(@scriptName, $file_path.$f->{exesequence}."_ID_".$f->{remotecommandid}."_SO_".$f->{salesorder}."_rack".$f->{rack}."_shelf".$f->{shelf}."_".$Sname);
 		push(@scriptContent, $Scontent);
 		push(@remoteCommandID, $f->{remotecommandid});
 		push(@interpreter, $Sinterpreter);
@@ -304,7 +304,7 @@ for ( my $c = 0; $c < $size; $c++) {
 			$ret = $?/256;
 			if ($ret == 0 || $ret == 145 ){
 				$flag = ($exeFlag[$c] == 0) ? 1:101;
-				$REST = $REST. '"executionflag" : "'.$flag.'", "returncode" : "'.$ret.'", "returnstdout" : "The script output cannot be parsed, only signal error check. The command running is: '.$cmd.'" }';
+				$REST = $REST. '"executionflag" : "'.$flag.'", "returncode" : "'.$ret.'", "returnstdout" : "Script Launched '.$cmd.'" }';
 		}
 		else
 		{
