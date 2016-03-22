@@ -296,13 +296,15 @@ for ( my $c = 0; $c < $size; $c++) {
 #print $remoteCommandID[$c]."\n";
 
 # Decide if expect to not wait for
+		my $cmdDisplay = $cmd;
+		$cmdDisplay =~ s/"//g;
 		if ($exeSeq[$c] == 0)
 		{	
 			# Put the command in execution date on the database to avoid to be executed two times
                         my $TEMP; # hold the temporary reponse
                                 $flag = 9;
                         $ret = 9;
-                        $TEMP =  $REST.'"executionflag" : "'.$flag.'", "returncode" : "'.$ret.'", "returnstdout" : "The script is going to be executed. The command running is: '.$cmd.'" }';
+                        $TEMP =  $REST.'"executionflag" : "'.$flag.'", "returncode" : "'.$ret.'", "returnstdout" : "The script is going to be executed. The command running is: '.$cmdDisplay.'" }';
                 $req->content($TEMP);
                 my $resp = $lwp->request($req);
                 print $req->as_string;
@@ -313,7 +315,8 @@ for ( my $c = 0; $c < $size; $c++) {
 			$ret = $?/256;
 			if ($ret == 0 || $ret == 145 ){
 				$flag = ($exeFlag[$c] == 0) ? 1:101;
-				$REST = $REST. '"executionflag" : "'.$flag.'", "returncode" : "'.$ret.'", "returnstdout" : "Script Launched '.$cmd.'" }';
+				$REST = $REST. '"executionflag" : "'.$flag.'", "returncode" : "'.$ret.'" }';
+		#		$REST = $REST. '"executionflag" : "'.$flag.'", "returncode" : "'.$ret.'", "returnstdout" : "Script Launched '.$cmdDisplay.'" }';
 		}
 		else
 		{

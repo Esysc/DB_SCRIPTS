@@ -13,6 +13,8 @@
 
 PROGNAME=${0##*/}
 VERSION="0.1"
+ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
+log INFO "ID $ID"
 typeset APISERVER="x.x.x.204" # IP address of the api server
 clean_up() { # Perform pre-exit housekeeping
   return
@@ -157,6 +159,9 @@ do
 done
 [[ -z "$COMMAND" ]] && usage && error_exit "not enough arguments or wrong options"
 # Main logic
+if [[ "$user" == "root" ]];then
+	user=""
+fi
 
 SUDO=$(which su)
 if [[ ! -z "$user" ]]; then
@@ -165,7 +170,6 @@ if [[ ! -z "$user" ]]; then
 else
 	log INFO "$(echo -e '\nCommand output:' &&  eval $COMMAND)"
 fi
-
 
 graceful_exit
 
