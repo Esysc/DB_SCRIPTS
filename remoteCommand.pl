@@ -9,6 +9,7 @@
 #
 #
 use Time::Piece;
+use Time::Local;
 use integer;
 use POSIX qw(strftime);
 use Backticks;
@@ -88,7 +89,6 @@ my $address = getIPAddress();
 #
 # Get data in json format, parse and prepare
 # the argument is the client address to filter SQL request and the return values are all commands for client not yet executed
-#my data = from_json get  "http://x.x.x.210/RESTGwy/portal.php/readCommand?so=*&rack=*&shelf=*&clientAddress=".$address;
 
 my $uri_get = $REST_SERVER.'/SPOT/provisioning/api/remotecommandses?';
 my $uri_delete = $REST_SERVER.'/SPOT/provisioning/api/remotecommands/';
@@ -113,9 +113,18 @@ my $req_delete;
 foreach  $f  ( @recursive ) {
 	if ($f->{executionflag} ne 0 and $f->{executionflag} ne 100) {
 
-		print "$f->{exectime}\n";
-		my $nowTime = localtime;
+		my $nowTime = localtime();
 		my $execTime = $f->{exectime};
+		if ( $execTime eq "" ) { 
+		        my  $newDate  = $f->{logtime};
+			my ($year,$mon,$mday,$hour,$min,$sec) = split /[-,\s\:]+/, $newDate;
+			print "Log time: $newDate\n";
+			print "Year $year\nMonth $mon\nDay $mday\nHour $hour\nMinute $min\nSecond $sec\n";
+			my $time = timelocal($sec,$min,$hour,$mday,$mon-1,$year);
+			$execTime = scalar localtime $time;
+		}
+		print "Now is : $nowTime\n";
+                print "Exec time was: $execTime\n";
 		my $tp1 = Time::Piece->strptime($nowTime, '%a %b %d %H:%M:%S %Y');
 		my $tp2 = Time::Piece->strptime($execTime, '%a %b %d %H:%M:%S %Y');
 		print "Now is : $tp1 \n";
@@ -131,7 +140,7 @@ foreach  $f  ( @recursive ) {
 			print "\n REST interface: About to remove past successfull commands already executed....\n";
 		}
 		else
-		{
+		{	print "The diffrence is $diff.\n";
 			print "The difference is less than two hours.\nAborting delete from database.....\n";
 		}
 	}
