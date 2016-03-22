@@ -163,7 +163,7 @@ if [[ ! -z "$user" ]]; then
         USER="$SUDO -l $user -c "
 	log INFO "$($USER  eval $COMMAND)"
 else
-	log INFO "$(eval $COMMAND)"
+	log INFO "$(echo -e '\nCommand output:' &&  eval $COMMAND)"
 fi
 
 
