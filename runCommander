@@ -13,7 +13,7 @@
 
 PROGNAME=${0##*/}
 VERSION="0.1"
-
+typeset APISERVER="x.x.x.204" # IP address of the api server
 clean_up() { # Perform pre-exit housekeeping
   return
 }
@@ -55,33 +55,36 @@ help_message() {
   Options:
   -h, --help  Display this help message and exit.
   -u, --user  User on the system to run as
-  -c, --command  command to execute
+  -c, --command  command to execute , example "ls -l " (quoting is important)
 
 _EOF_
   return
 }
 
 log() {
-local level=${1?}
-shift
-local code= line="[$(date '+%F %T')] $level: $*"
-if [ -t 2 ]
-then
-case "$level" in
-INFO) code=36 ;;
-DEBUG) code=30 ;;
-WARN) code=33 ;;
-ERROR) code=31 ;;
-*) code=37 ;;
-esac
-echo -e "\e[${code}m${line}\e[0m"
-else
-echo "$line"
-fi >&2
-
-REST='{"title":"'$COMMAND'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
-(
-perl - "$REST"  <<'_HERE_'
+  local level=${1?}
+  shift
+  local code=""
+  local line="[$(date '+%F %T')] $level: $*"
+  if [ -t 2 ]
+  then
+    case "$level" in
+      INFO) code=36 ;;
+      DEBUG) code=30 ;;
+      WARN) code=33 ;;
+      ERROR) code=31 ;;
+      *) code=37 ;;
+    esac
+    echo -e "\e[${code}m${line}\e[0m"
+  else
+    echo "$line"
+  fi >&2
+  if [[ "$ID" == "" ]]; then
+    REST='{"title":"'$COMMAND'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
+    URI="http://$APISERVER/SPOT/provisioning/api/events"
+    METHOD="POST"
+  (
+perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
 use integer;
 use POSIX qw(strftime);
 use Backticks;
@@ -100,18 +103,30 @@ use HTTP::Cookies;
 use HTTP::Request;
 use LWP;
 use File::Path qw{mkpath};
-my $uri = "http://x.x.x.204/SPOT/provisioning/api/events";
+my $uri = shift;
 my $REST = shift;
+my $METHOD = shift;
 my $lwp = LWP::UserAgent->new(
                         timeout               => 10,
 );
-my $req = HTTP::Request->new( 'POST', "$uri" );
+my $req = HTTP::Request->new( "$METHOD", "$uri" );
 $req->content($REST);
 my $resp = $lwp->request($req);
 print $req->as_string;
 #print Dumper $resp;
 _HERE_
-)  2>&1 >/dev/null
+  )  >/dev/null 2>&1
+
+  else
+    REST="content=$line&commandid=$ID"
+    URI="http://$APISERVER/SPOT/provisioning/includes/logWrapper.php"
+    METHOD="POST"
+     curl -i \
+    -H "UserAgent: perl" \
+    -X $METHOD --data "$REST" $URI --trace-ascii /dev/stdout  >/dev/null 2>&1
+  fi
+
+
 }
 
 
@@ -132,28 +147,24 @@ do
          shift 2
 	 ;;
     -c | --command)
-	 shift 1
-         COMMAND="$*" # You may want to check validity of $2
+         COMMAND="$2" # You may want to check validity of $2
          shift 2
           ;;
      *)
-	if [ $? -ne 0 ]; then
-		usage
-		error_exit "not enough arguments or wrong options"
-	fi
-
        break
 	;;
   esac
 done
-
+[[ -z "$COMMAND" ]] && usage && error_exit "not enough arguments or wrong options"
 # Main logic
 
 SUDO=$(which su)
 if [[ ! -z "$user" ]]; then
         USER="$SUDO -l $user -c "
+	log INFO "$($USER  eval $COMMAND)"
+else
+	log INFO "$(eval $COMMAND)"
 fi
-log INFO "$($USER  \"$COMMAND\")"
 
 
 graceful_exit
