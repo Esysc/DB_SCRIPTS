@@ -14,7 +14,6 @@
 PROGNAME=${0##*/}
 VERSION="0.1"
 ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
-log INFO "ID $ID"
 typeset APISERVER="x.x.x.204" # IP address of the api server
 clean_up() { # Perform pre-exit housekeeping
   return
@@ -85,6 +84,12 @@ log() {
     REST='{"title":"'$COMMAND'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
     URI="http://$APISERVER/SPOT/provisioning/api/events"
     METHOD="POST"
+  else
+    REST='{"returnstdout" : "'"$line"'"}'
+    URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
+    METHOD="POST"
+  fi
+
   (
 perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
 use integer;
@@ -115,18 +120,10 @@ my $req = HTTP::Request->new( "$METHOD", "$uri" );
 $req->content($REST);
 my $resp = $lwp->request($req);
 print $req->as_string;
-#print Dumper $resp;
+print Dumper $resp;
 _HERE_
   )  >/dev/null 2>&1
 
-  else
-    REST="content=$line&commandid=$ID"
-    URI="http://$APISERVER/SPOT/provisioning/includes/logWrapper.php"
-    METHOD="POST"
-     curl -i \
-    -H "UserAgent: perl" \
-    -X $METHOD --data "$REST" $URI --trace-ascii /dev/stdout  >/dev/null 2>&1
-  fi
 
 
 }
