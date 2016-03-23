@@ -39,10 +39,20 @@ log() {
   else
     echo "$line"
   fi >&2
-  if [[ "$ID" == "" ]]; then
-    REST='{"title":"'`basename $0`' | '$rackPosition'","content":"'$line'","userid":"'$(whoami)'","date":"'$(date)'"}'
+  line=${line//\"/\\\"}
+  line=${line//\\/\\\\}
+  line=${line//>/}
+  line=${line//</}
+   if [[ "$ID" == "" ]]; then
+    REST='{"title":"'"$PROGNAME"'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
     URI="http://$APISERVER/SPOT/provisioning/api/events"
     METHOD="POST"
+  else
+    REST='{"returnstdout" : "'"$line"'"}'
+    URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
+    METHOD="POST"
+  fi
+
   (
 perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
 use integer;
@@ -77,15 +87,6 @@ print $req->as_string;
 _HERE_
   )  >/dev/null 2>&1
 
-  else
-    REST="content=$line&commandid=$ID"
-    URI="http://$APISERVER/SPOT/provisioning/includes/logWrapper.php"
-    METHOD="POST"
-     curl -i \
-    -H "UserAgent: perl" \
-    -X $METHOD --data "$REST" $URI --trace-ascii /dev/stdout  >/dev/null 2>&1
-  fi
-
   
 }
 
@@ -97,7 +98,7 @@ scpExe () {
   # $3 target file
   host=$1
   log INFO "Start copying $2 to $host:$3 ..........."
-  sshpass -p $password scp -p  -r -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $2 root@$1:$3
+  log INFO "$(sshpass -p $password scp -p  -r -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $2 root@$1:$3)"
   if [[ $? -ne 0 ]]
   then
     log ERROR "Cannot scp $2 file to client, every further action will be not possible so I exit right now!"
@@ -112,7 +113,7 @@ sshExe() {
   #
   # $2 command or function
   log INFO "Executing sshpass -p $password ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t root@$1  $2"
-  sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t root@$1 " $2" 
+  log INFO "$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t root@$1 " $2")" 
   if [[ $? -ne 0 ]]
   then
     log ERROR "Execution Error! May be ssh connection problem or execution of command'$2' issue. I will exit now."

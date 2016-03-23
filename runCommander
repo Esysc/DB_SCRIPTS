@@ -80,8 +80,13 @@ log() {
   else
     echo "$line"
   fi >&2
+   line=${line//\"/\\\"} 
+   line=${line//\\/\\\\}
+   line=${line//>/}
+   line=${line//</}
+
   if [[ "$ID" == "" ]]; then
-    REST='{"title":"'$COMMAND'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
+    REST='{"title":"'"$PROGNAME"'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
     URI="http://$APISERVER/SPOT/provisioning/api/events"
     METHOD="POST"
   else
@@ -122,12 +127,28 @@ my $resp = $lwp->request($req);
 print $req->as_string;
 print Dumper $resp;
 _HERE_
-  )  >/dev/null 2>&1
+  )  >/dev/null 2>&1 
 
-
+ #>/dev/null 2>&1
 
 }
 
+
+do_cmd()
+{
+    TFILE="/tmp/$$.tmp"
+    log INFO "$( eval $@ ; echo $? > $TFILE)"
+    ret=$(cat $TFILE)
+    if [[ $ret -eq 0 ]]
+    then
+        log INFO "Successfully ran [ $@ ]"
+    else
+        log ERROR  "Error: Command [ $@ ] returned $ret"
+        rm  $TFILE
+        exit $ret
+    fi
+    rm $TFILE
+}
 
 # Trap signals
 trap "signal_exit TERM" TERM HUP
@@ -156,6 +177,8 @@ do
 done
 [[ -z "$COMMAND" ]] && usage && error_exit "not enough arguments or wrong options"
 # Main logic
+
+COMMAND=${COMMAND//\\\"/\"}
 if [[ "$user" == "root" ]];then
 	user=""
 fi
@@ -163,9 +186,9 @@ fi
 SUDO=$(which su)
 if [[ ! -z "$user" ]]; then
         USER="$SUDO -l $user -c "
-	log INFO "$($USER  eval $COMMAND)"
+	$USER   do_cmd $COMMAND
 else
-	log INFO "$(echo -e '\nCommand output:' &&  eval $COMMAND)"
+	  do_cmd $COMMAND
 fi
 
 graceful_exit
