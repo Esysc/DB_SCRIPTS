@@ -21,6 +21,8 @@ ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
 ## Global Variables
 
 typeset APISERVER="x.x.x.204" # IP address of the api server
+
+
 log() {
   local level=${1?}
   shift
@@ -48,7 +50,7 @@ log() {
     URI="http://$APISERVER/SPOT/provisioning/api/events"
     METHOD="POST"
   else
-    REST='{"returnstdout" : "'"$line"'"}'
+    REST='{"returnstdout" : "|'"$hostNAME"'| '"$line"'"}'
     URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
     METHOD="POST"
   fi
@@ -112,8 +114,12 @@ sshExe() {
   # $1 client ip
   #
   # $2 command or function
-  log INFO "Executing sshpass -p $password ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t root@$1  $2"
-  log INFO "$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t root@$1 " $2")" 
+  if [[ "$hostNAME" == "" ]]; then
+	hostNAME=$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -tt root@$1 " hostname ")
+        hostNAME=$(echo "$hostNAME"| tr -d '\040\011\012\015')
+  fi
+  log INFO "$2"
+  log INFO "$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -tt root@$1 " $2 ")" 
   if [[ $? -ne 0 ]]
   then
     log ERROR "Execution Error! May be ssh connection problem or execution of command'$2' issue. I will exit now."
@@ -126,10 +132,9 @@ getHostname() {
 
 #Get the hostname of the conecerned host
 
-rackPosition=$(sshExe $host hostname)
+sshExe $host hostname
 
 }
-
 copyModules () {
   baseDir="/home/operator/delivery"
   #baseName=$(basename $module)
@@ -315,11 +320,15 @@ test_args
     error_exit
   fi
 
+
 getHostname
+
+
+
 copyModules
 if [ $provision -eq 1 ]; then
   remoteInstall
 fi
-
+log INFO "************************  PROGRAM TERMINATED $module ON $hostNAME ***********************************"
 graceful_exit
 
