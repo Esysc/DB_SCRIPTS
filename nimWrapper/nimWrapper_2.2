@@ -153,11 +153,7 @@ shelf$shelf $switchport"
 ;;
 esac
 #SET Installationip var for logging in the dashboard
-INSTALLATIONIP="<table class='collection table table-bordered'>
-                        <tr><th>Bootp ip</th><td>$bootpip</td></tr>
-                        <tr><th>Cyclades:Port</th><td>$cycladesip : $cycladesport</td></tr>
-                        <tr><th>Switch - Port</th><td>$switchip - $switchport</td></tr>
-              </table>"
+INSTALLATIONIP="<table class='collection table table-bordered'><tr><th>Bootp ip</th><td>$bootpip</td></tr><tr><th>Cyclades:Port</th><td>$cycladesip : $cycladesport</td></tr><tr><th>Switch - Port</th><td>$switchip - $switchport</td></tr></table>"
 
 
 log INFO "The env values for cyclades are $CYCLADES and for switches $switch_maps"
@@ -283,23 +279,23 @@ _HERE_
 if [[ ! -z $salesOrder && ! -z $nimclient ]]; then
 PK="["$salesOrder"]["$nimclient"]"
 URI="http://$APISERVER/SPOT/provisioning/api/provisioningnotifications/$PK"
-        REST="{
-        \"notifid\":\"$PK\",
-        \"hostname\":\"$hostname\",
-        \"installationip\":\"$INSTALLATIONIP\",
-        \"configuredip\":\"$ipaddress\",
-        \"status\":\"<b>$line</b>\",
-        \"progress\":\"$PROGRESS\",
-        \"image\":\"$image\",
-        \"firmware\":\"IBM OpenFirmware\",
-        \"ram\":\"N/D\",
-        \"cpu\":\"N/D\",
-        \"diskscount\":\"N/D\",
-        \"netintcount\":\"N/D\",
-        \"model\":\"N/D\",
-        \"serial\":\"N/D\",
-        \"os\":\"$SPOT\"
-        }"
+        REST='{
+        "notifid":"'"$PK"'",
+        "hostname":"'"$hostname"'",
+        "installationip":"'$INSTALLATIONIP'",
+        "configuredip":"'"$ipaddress"'",
+        "status":"<b>'"$line"'</b>",
+        "progress":"'"$PROGRESS"'",
+        "image":"'"$image"'",
+        "firmware":"IBM OpenFirmware",
+        "ram":"N/D",
+        "cpu":"N/D",
+        "diskscount":"N/D",
+        "netintcount":"N/D",
+        "model":"N/D",
+        "serial":"N/D",
+        "os":"'"$SPOT"'"
+        }'
 
         # Write monitoring infos to web service
 SEND >/dev/null 2>&1 
@@ -310,11 +306,13 @@ fi
 
 SEND () {
 
-
-perl -e '
+(
+perl - "$REST" "$URI"  <<'_HERE_'
 use integer;
 use POSIX qw(strftime);
+use Backticks;
 use Data::Dumper;
+use Sys::Hostname;
 use Socket;
 use LWP::UserAgent;
 use LWP::Simple;
@@ -322,21 +320,24 @@ use strict;
 use warnings;
 use integer;
 use Switch;
+use JSON ;
 use HTTP::Cookies;
 use HTTP::Request;
 use LWP;
+use File::Path qw{mkpath};
 my $REST = shift;
 my $uri = shift;
 my $lwp = LWP::UserAgent->new(
                         timeout               => 10,
 );
-my $req = HTTP::Request->new( "PUT", "$uri" );
+my $req = HTTP::Request->new( 'PUT', "$uri" );
 $req->content($REST);
 my $resp = $lwp->request($req);
 print $req->as_string;
-#print Dumper $resp;
+print Dumper $resp;
 exit;
-' "$REST" "$URI"
+_HERE_
+) >/dev/null 2>&1
 
 
 }

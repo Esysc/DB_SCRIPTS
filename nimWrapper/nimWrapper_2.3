@@ -5,7 +5,7 @@
 #               Require serial cyclades connection.
 #author         :ACS
 #date           :20160303
-#version        :2.2
+#version        :2.3
 #usage          :./nimWrapper
 #notes          :
 #ksh_version    :Version M-11/16/88f
@@ -15,7 +15,7 @@
 #@(#) General Information
 #@(#)   Name      : nimWrapper
 #@(#)   Purpose   : Aim to manage nim jobs
-#@(#)   Version   : 2.2
+#@(#)   Version   : 2.3
 #@(#)   Author    : A. Cristalli
 #@(#)------------------------------------------------------
 #@(#) Usage
@@ -28,8 +28,6 @@
 #@(#)   Boot in maintenance or diag mode:
 #@(#)     nimWrapper -c nimclient -i [diag|maint_boot] -spot [spot name]|[if empty return a list of spots]
 #@(#)
-#@(#)   Configure a redundant interface (bond) in dhcp:
-#@(#)     nimWrapper -c '<dev_1>..<dev_n>' -D [-N <hostname>] [-P]
 #@(#)
 #@(#)   Complete example of usage
 #@(#)     nimWrapper -a [aixtz] -c [nimclient] -d [disksize(GB)] -g [default gateway] -h [hostname] -i [image name] -ip [ip address] -m [mirror:0|1] -n [netmask] -p [paging size] -s [sales order number] -boot [normal|factory]  -nocheck (for VMs or delayed tasks)
@@ -51,10 +49,7 @@
 #@(#)   -s        : Set the sales order this client belong to 		(optional)
 #@(#)   -boot     : Auto Poweron SMS config normal/factory		(optional)	default "do nothing"
 #@(#)   -nocheck  : Check if the nim client is exists andconnected	(optional)	default "do nothing"
-#@(#)   -M        : Set bond mode. 0 to 6 (default: 1)
-#@(#)   -e        : Set ethtool options
-#@(#)   -r        : Change config file(s) only (no action)
-#@(#)   -h        : Display this help
+#@(#)   -H        : Display this help
 #@(#)   -x        : Debug Mode
 #@(#)------------------------------------------------------
 #@(#) Exit Codes
@@ -63,12 +58,15 @@
 #@(#)    1        : Failed
 #@(#)------------------------------------------------------
 
+typeset PROGNAME=${0##*/}
+typeset VERSION="0.1"
 
 typeset APISERVER="spmgt.my.comp.ltd"
 typeset EXPECT="/usr/bin/expect"
-typeset scriptName="$0"
 typeset LSNIM=$(which lsnim)
 typeset expectserver="spmgt.my.comp.ltd"
+typeset hostsFile="$(cat /data/backup/hosts)"
+typeset ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
 
 #Determine the nim ip address (in the case we have more than one nim)
 #this value is than use to set SMS nim server value to boot of
@@ -78,51 +76,6 @@ nimserver=$(ifconfig -a | grep $NIMNET | cut -d\  -f2)
 
 nimnetmask="255.255.255.0"
 nocheck=0
-#Set nim hosts file for clients
-TIMEZONEALLOWED="
-UT0
-BST11
-HST10
-AST9
-PST8
-MST7
-CST6
-EST5
-AST4
-AST3:30
-GRNLNDST3
-FALKST2
-AZOREST1
-GMT0
-NFT-1
-MEST-2
-WET-2
-USAST-2
-SAUST-3
-MSK-3
-EAT-3
-IRDT-3:30
-WST-4
-AFT-4:30
-PAKST-5
-IST-5:30
-NPT-5:45
-NOVST-6
-MMT-6:30
-THAIST-7
-BEIST-8
-ULAT-8
-WAUST-8
-TAIST-8
-JST-9
-KORST-9
-CST-9:30
-EET-10
-VLAT-10
-MET-11
-NZST-12
-"
-
 # Gets the cyclades and swithes values from DB
 getEnv() {
 
@@ -254,22 +207,10 @@ check_args() {
  valid_ip $gateway && [ "$ERROR" -ne 0 ] && log ERROR "Gateway not valid" && exit 1
  [[ ! -z "$bootClient" ]] && ! [[   "$bootClient" == "normal" ||  "$bootClient"  == "factory" ]] &&
  log ERROR "You put a wrong param ($bootClient) on -boot option. You can omit it or set to 'factory' or 'normal'"  && exit 1
- [[ -z `lsnim -c machines | grep $nimclient` ]] && log ERROR "Hey, this client doesn't exists on nim...! check your spelling" && exit 1
- ERROR=1
- for time in `echo "$TIMEZONEALLOWED"`
- do
- if [[ "$aixtz" == ${time}* ]]; then
- ERROR=0
- break
- fi
- done
-#Force the TZ right
-ERROR=0
- [ $ERROR -eq 1 ] && log ERROR "The timezone you defined $aixtz is not in valid range. Please note the DST validation is not performed yet" && log WARN "valid values ranges are $TIMEZONEALLOWED" && exit 1
- log INFO "GOOD! the time zone you defined, '$aixtz' apperently is correct.  Please note the DST validation is not performed yet."
+ [[ -z $($LSNIM -c machines | grep $nimclient) ]] && log ERROR "Hey, this client doesn't exists on nim...! check your spelling" && exit 1
 
  # Check if the image exists and is defined
-IMAGES=`lsnim -t mksysb`
+IMAGES=$($LSNIM -t mksysb)
 echo $IMAGES | grep -w "$image" > /dev//null 2>&1  
  [  $? -eq 1 ] && log ERROR "The mksysb image '$image' was not found on NIM. Please check the name you typed. Available images are: \n$IMAGES" && exit 1
 }
@@ -279,31 +220,41 @@ echo $IMAGES | grep -w "$image" > /dev//null 2>&1
 
 
 log() {
-level=${1?}
-shift
-line="[$(date '+%F %T')] $level: $*"
-if [ -t 2 ]
-then
-case "$level" in
-INFO) code=32 ;;
-DEBUG) code=35 ;;
-WARN) code=33 ;;
-ERROR) code=31 ;;
-*) code=0 ;;
-esac
-echo "\033[${code}m${line}\033[0m"
-else
-echo "$line"
-fi >&2
+ level=${1?}
+ shift
+ line="[$(date '+%F %T')] $level: $*"
+ if [ -t 2 ]
+ then
+	case "$level" in
+		INFO) code=32 ;;
+		DEBUG) code=35 ;;
+		WARN) code=33 ;;
+		ERROR) code=31 ;;
+		*) code=0 ;;
+	esac
+	echo "\033[${code}m${line}\033[0m"
+ else
+	echo "$line"
+ fi >&2
 
 
 
 #LOG to web services
-#Create one section for each web service
 
-REST='{"title":"nimWrapper | '$nimclient'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
-(
-perl - "$REST"  <<'_HERE_'
+
+ if [[ "$ID" == "" ]]; then
+    REST='{"title":"'"$PROGNAME"'","content":"'$line'","userid":"'$(whoami)'","date":"'$(date)'"}'
+    URI="http://$APISERVER/SPOT/provisioning/api/events"
+    METHOD="POST"
+  else
+    REST='{"returnstdout" : "|'"$hostNAME"'| '"$line"'"}'
+    URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
+    METHOD="POST"
+ fi
+
+
+ (
+perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
 use integer;
 use POSIX qw(strftime);
 use Backticks;
@@ -317,23 +268,25 @@ use warnings;
 use integer;
 use Switch;
 use JSON ;
+use feature qw(switch);
 use HTTP::Cookies;
 use HTTP::Request;
 use LWP;
 use File::Path qw{mkpath};
-my $uri = "http://$APISERVER/SPOT/provisioning/api/events";
+my $uri = shift;
 my $REST = shift;
+my $METHOD = shift;
 my $lwp = LWP::UserAgent->new(
                         timeout               => 10,
 );
-my $req = HTTP::Request->new( 'POST', "$uri" );
+my $req = HTTP::Request->new( "$METHOD", "$uri" );
 $req->content($REST);
 my $resp = $lwp->request($req);
 print $req->as_string;
 #print Dumper $resp;
-exit;
 _HERE_
-) >/dev/null 2>&1  
+  )  >/dev/null 2>&1
+
 
 if [[ ! -z $salesOrder && ! -z $nimclient ]]; then
 PK="["$salesOrder"]["$nimclient"]"
@@ -396,51 +349,6 @@ exit;
 
 }
 
-#Check whish option to use in Asmi menu
-
-checkMenu () {
-  TEST=$(which expect 2> /dev/null)
-  EXPECT=${TEST:-/usr/local/bin/expect}
-  line=$(echo  "$CYCLADES" | grep "$rackPosition" | awk '{print $2}')
-  address=$(echo "$line" | awk -F ":" '{print $1}')
-  port=$(echo "$line" | awk -F ":" '{print $2}')
- log INFO  "Cyclades information: $address:$port"
-  while true
-  do
-  OUTPUT=$($EXPECT  -c "
-        #exp_internal 1
-        spawn  telnet $address $port
-        expect \" *\"
-        send \\n
-        expect \"  \"
-        send \\n
-        expect \" *\"
-        send \\n
-        send \"\\$?\\r\"
-  " )
-  [ $? -eq 0 ] && break || echo "retrying ..."
-  done
-  word="type"
-OLDIFS="$IFS"
-IFS=$'\n' # bash specific
-   for line in $OUTPUT
-#echo $OUTPUT |   while  read -r line
-  do
-    test "${line#*$word}" != "$line" &&  tmp=${line#*:}   &&  break;
-   done #<<< "$OUTPUT"
- IFS="$OLDIFS"
-  POWERON=8
-  ETHERNET=6
-  POWER8="8284 8286 8247 8335 8348 8408 9119"
-        for MODEL in $POWER8
-        do
-log INFO "Looping between power8 models..... $MODEL"
-                test "${tmp#*$MODEL*}" != "$tmp" &&  POWERON=7 && ETHERNET=4 && break
-        done
-  # Return 7 or 8 following the model (if found 828 in the model type)
-  log WARN  "Menu choiche for power on is $POWERON and for boot ethernet choiche $ETHERNET . The complete banner output from asmi: $OUTPUT"
-}
-
 
 # check IP address function
 valid_ip() {
@@ -483,6 +391,9 @@ fi
 #Power on, set bootip ip address on client and start network for install
 
 powerOnAndInstall () {
+#       Expect path on remote server
+#       This expect function need to be  executed on a remote linux server to avoid coredump
+EXPECT=/usr/bin/expect
 line=$(echo  "$CYCLADES" | grep $nimclient | awk '{print $2}')
 address=$(echo $line | awk -F ":" '{print $1}')
 port=$(echo $line | awk -F ":" '{print $2}')
@@ -527,7 +438,7 @@ send -s -- "1\r"
                 ;;
 esac
 log INFO "About to power ON the server and set SMS to boot on network...... "
-sshExe $expectserver /usr/bin/expect -c <<EXPECT
+sshExe $expectserver $EXPECT  <<EXPECT  > /dev/null 2>&1
 set send_slow {1 .1}
 catch {spawn -noecho telnet $address $port}
 set timeout 10
@@ -561,27 +472,24 @@ expect "CONTINUE: " { send \\n; sleep 1 }
 expect "S1> "      { send 99\\n; sleep 1 }
 expect "out. \\n"      { send "~." }
 expect "~."        { send "\\n" }
-puts "\\n\\nPower On Successful\\n"; 
+puts "\\n\\nPower On Successful\\n";
 puts "\\n\\nWaiting for SMS menu\\n";
 set timeout -1
-puts "\\n\\nSleeping for 120 seconds (about 2 minutes)\\n";
-sleep 120
+puts "\\n\\nSleeping for 60 seconds \\n";
+sleep 60
 puts "\\n\\nI'm getting up now,  spawning sms commands...\\n";
 send  \\r
 send  \\r
 send  \\r
 $acceptLicense
-expect -exact "     Memory      Keyboard     "
+expect  "     Memory      Keyboard     "
 sleep .1
 send -s -- "1"
-expect -exact "Network     SCSI     "
-sleep .1
-send -s -- "1"
-expect -exact " Type menu item number and press Enter:"
-sleep .1
+expect  " Type menu item number and press Enter:"
+sleep 1
 send -s -- "2\\r"
 expect -exact ""
-sleep .1
+sleep 1
 send -s -- "a"
 expect -exact "*"
 sleep .1
@@ -662,7 +570,7 @@ expect -exact " Type menu item number and press Enter or select Navigation key:"
 sleep .1
 send -s -- "1\\r"
 puts "\\n\\nSuccess! the server is booting now...\\n";
-sleep 240
+sleep 120
 send "\\035"
 expect "elnet> "    { send quit\\n }
 expect eof
@@ -674,22 +582,38 @@ log INFO "The server should be powered on and trying to boot from network...."
 
 bootSpecial () {
 
+ SPOTS=$($LSNIM -t spot | awk '{print $1}')
+ for i in $SPOTS
+        do
+        if [[ "$i" == "$spot" ]]; then
+                break
+        fi
+ done
+ [[ "$i" != "$spot" ]] && log ERROR " Spot choiche is mandatory, you can choose between the following ones:  \n$SPOTS" && RET=1
+ ( [[  "$image" != "maint_boot" ]] && [[ "$image" != "diag" ]] ) && log ERROR "The tasks must named either 'diag' or 'maint_boot'" && RET=1
+ [[ $RET -eq 1 ]] && exit $RET
+ if [ $nocheck -eq 0 ]; then
+        checkRack
+        if [ $RET -eq 144 ]; then
+                exit $RET
+        fi
+ fi
 #Reset before to allocate
-log INFO "Resetting resources before to allocate"
-nim -F -o reset $nimclient
-nim -o deallocate -a subclass=all $nimclient
+ log INFO "Resetting resources before to allocate"
+ nim -F -o reset $nimclient
+ nim -o deallocate -a subclass=all $nimclient
 
 
-log INFO "Launching the job $image for $nimclient"
-nim -o $image -a spot=$spot $nimclient
-if [ $? -eq 0 ]
-then
-log INFO "Successfully scheduled the job $image for $nimclient"
-exit  0
-else
-log ERROR "Something goes wrong running nim -o $image -a spot=$spot $nimclient"
-exit 1
-fi
+ log INFO "Launching the job $image for $nimclient"
+ nim -o $image -a spot=$spot $nimclient
+ if [ $? -eq 0 ]
+ then
+	log INFO "Successfully scheduled the job $image for $nimclient"
+	exit  0
+ else
+	log ERROR "Something goes wrong running nim -o $image -a spot=$spot $nimclient"
+	exit 1
+ fi
 
 }
 
@@ -697,7 +621,7 @@ fi
 
 checkClient () {
 
-[[ -z `lsnim -c machines | grep $nimclient` ]] && log ERROR "Hey, this client doesn't exists on nim...! check your spelling" && exit 1 || log INFO "Good! the client nim is valid"
+[[ -z i$($LSNIM -c machines | grep $nimclient) ]] && log ERROR "Hey, this client doesn't exists on nim...! check your spelling" && exit 1 || log INFO "Good! the client nim is valid"
 
 }
 
@@ -707,78 +631,115 @@ checkClient () {
 checkRack () {
 # exit 144 => no connection
 # exit 145 => asmi presents
-getEnv
-checkClient
-if [ $? -eq 1 ];then
-exit 1
-fi
-#echo "nocheck $nocheck"
-if [ $nocheck -eq 0 ];  then
-line=$(echo  "$CYCLADES" | grep $nimclient | awk '{print $2}')
-address=$(echo $line | awk -F ":" '{print $1}')
-port=$(echo $line | awk -F ":" '{print $2}')
-log INFO "Checking if IBM machine is connected on $nimclient"
-/usr/local/bin/expect >/dev/null 2>&1 <<EXP
-set send_slow {1 .1}
-catch {spawn -noecho telnet $address $port}
-set timeout 2
-#Default value is 300
-set sig 400
-expect {
-         " DEVICE LOCKED" { puts "*********locked"; set sig 400}
-         "onnected" {
-                 send \n;
-                 }
-         "ogin: " {
-                 puts "**** already active exiting";set sig 400;
-                 }
-         }
-         send \n;
-         expect {
-                "out."      {
-                            puts "The server is connected"; set sig 401 }
-                "User ID: " { puts "The server is connected"; set sig 401 }
-                "ogin: " {
-                 puts "**** already active exiting"; set sig 401;
-                 }
-                "S1> " { puts "The server is connected"; send 99\n; set sig 401 }
-                }
-puts "exit signal is \$sig"
-#send_error "\$sig"
-exit \$sig
-close
-expect eof
-EXP
-RET=$?
-[[ $RET -eq 144 ]] && log WARN "I can't detected a IBM client on $nimclient . Check if the telnet connection is not owned by something else"
-[[ $RET -eq 145 ]] && log INFO "Good! A IBM client has been detected"
-#echo $RET
-fi
+ checkClient
+ if [ $? -eq 1 ];then
+ 	exit 1
+ fi
+ if [ $nocheck -eq 0 ];  then
+	checkMenu
+	if [[ ! -z "$bootClient" ]]; then
+		log WARN "Power on the client $nimclient in $bootClient mode"
+		PROGRESS=8 && log WARN "This script is started in background to avoid to wait for the end (it takes around 4 minutes)"
+		powerOnAndInstall &
+	fi
+ fi
+
 }
 
+#Check whish option to use in Asmi menu
+
+checkMenu () {
+  TEST=$(which expect 2> /dev/null)
+  EXPECT=${TEST:-/usr/local/bin/expect}
+  line=$(echo  "$CYCLADES" | grep "$rackPosition" | awk '{print $2}')
+  address=$(echo "$line" | awk -F ":" '{print $1}')
+  port=$(echo "$line" | awk -F ":" '{print $2}')
+ log INFO  "Cyclades information: $address:$port"
+  OUTPUT=$($EXPECT  -c "
+        #exp_internal 1
+        set send_slow {1 .1}
+        set sig 400
+        catch {spawn -noecho telnet $address $port}
+        expect \" *\"
+        send \\n
+        expect \"  \"
+        send \\n
+        expect \" *\"
+        send \\n
+        send \\n
+        send \\n
+        send \"\\$?\\r\"
+        expect {
+         \" DEVICE LOCKED\" { set sig 400}
+         \"onnected\" {
+                 send \\n;
+                 }
+         \"ogin: \" {
+                 set sig 400;
+                 }
+         }
+         send \\n;
+         expect {
+                \"out.\"      {
+                            set sig 401 }
+                \"User ID: \" { set sig 401 }
+                \"ogin: \" {
+                 set sig 401;
+                 }
+                \"S1> \" {  send 99\\n; set sig 401 }
+                }
+        exit \$sig
+        close
+        expect eof
+  " )
+  RET=$?
+  [[ $RET -eq 144 ]] && log WARN "I can't detected a IBM client on $nimclient . Check if the telnet connection is not owned by something else" && exit $RET
+
+  word="type"
+OLDIFS="$IFS"
+IFS=$'\n' # bash specific
+   for line in $OUTPUT
+#echo $OUTPUT |   while  read -r line
+  do
+    test "${line#*$word}" != "$line" &&  tmp=${line#*:}   &&  break;
+   done #<<< "$OUTPUT"
+ IFS="$OLDIFS"
+  isPower8="Power7"
+  POWERON=8
+  ETHERNET=6
+  POWER8="8284 8286 8247 8335 8348 8408 9119"
+        for MODEL in $POWER8
+        do
+log INFO "Looping between power8 models..... $MODEL"
+                test "${tmp#*$MODEL*}" != "$tmp" &&  POWERON=7 && ETHERNET=4 && isPower8="Power8" && break
+        done
+  # Return 7 or 8 following the model (if found 828 in the model type)
+  log WARN  "Menu choiche for power on is $POWERON and for boot ethernet choiche $ETHERNET . The complete banner output from asmi: $OUTPUT"
+  [[ $RET -eq 145 ]] && log INFO "Good! A IBM client has been detected and has been identified as a $isPower8." 
+}
 
 check_spot () {
 #find the spot associated
 log INFO "Finding the associated SPOT to $image image"
-os_level_img=`lsnim -l $image | grep oslevel_r | awk -F "=" '{print $2}' | awk -F "-"  '{print $1}'`
-mod_img=`lsnim -l $image | grep mod | awk -F "=" '{print $2}'`
-extr_spot_img=`lsnim -l $image | grep extracted_spot | awk -F "=" '{print $2}'`
+os_level_img=$($LSNIM -l $image | grep oslevel_r | awk -F "=" '{print $2}' | awk -F "-"  '{print $1}')
+mod_img=$($LSNIM -l $image | grep mod | awk -F "=" '{print $2}')
+extr_spot_img=$($LSNIM -l $image | grep extracted_spot | awk -F "=" '{print $2}')
 if [ ! $extr_spot_img == '' ]; then
 out=$extr_spot_img
 
 log INFO "SPOT $out found"
 return 0
 else
-spots=`lsnim -t spot | awk '{print $1}'`
+spots=$($LSNIM -t spot | awk '{print $1}')
 for i in $spots ; do
-os_level_spot=`lsnim -l $i | grep oslevel_r | awk -F "=" '{print $2}' | awk -F "-"  '{print $1}'`
+os_level_spot=$($LSNIM -l $i | grep oslevel_r | awk -F "=" '{print $2}' | awk -F "-"  '{print $1}')
 if [[ $os_level_img == $os_level_spot  ]] ; then
 out=$i" "$out
 fi
 done
 fi
 for i in $out; do
-mod_spot=`lsnim -l $i | grep mod | awk -F "=" '{print $2}'`
+mod_spot=$($LSNIM -l $i | grep mod | awk -F "=" '{print $2}')
 if [[ $mod_spot -gt $mod_img ]] ; then
 out=$i
 log INFO "SPOT $out found"
@@ -786,7 +747,7 @@ return 0
 fi
 done
 for i in $out; do
-mod_spot=`lsnim -l $i | grep mod | awk -F "=" '{print $2}'`
+mod_spot=$($LSNIM -l $i | grep mod | awk -F "=" '{print $2}')
 if [[ $mod_spot == $mod_img  ]] ; then
 out=$i
 log INFO "SPOT $out found"
@@ -799,150 +760,112 @@ out='SPOT need to be created!!!!!\n'
 log WARN "$out"
 spot="SPOT_"$image
 log INFO "Creating spot $spot from $image image"
-spot_creation=`nim -o define -t spot -a server=master -a location=/data/backup/SPOT/mksysb -a source=$image -a installp_flags=-aQg $spot` || exit 1
+nim -o define -t spot -a server=master -a location=/data/backup/SPOT/mksysb -a source=$image -a installp_flags=-aQg $spot || exit 1
 out=$spot
 log INFO "End create spot $spot"
 }
-if [ $# -eq 0 ]; then
-usage
-fi
 
-# There some case where the arguments may be different (checkRack and bootSpecial functions)
-if [ $# -eq 2 ]; then
-	nimclient=$2
-	checkRack
-	exit $RET
-fi
-# Check if settings are for diag or maintenance mode
-if [ $# -le 7 ]; then
-	while :
-	do
-    		case "$1" in
-		-c )
-		 nimclient="$2"
-		 shift 2
-		 ;;
-		-i )
-		image="$2"
-		shift 2
-		;;
-		-spot )
-		spot=$2
-		shift 2
-		;;
-		-nocheck )
-		nocheck=1
-		shift 1
-		;;
-		*)
-		break
-		;;
-		esac
-	done
-SPOTS=`lsnim -t spot | awk '{print $1}'`
-for i in $SPOTS
-	do
-	if [[ "$i" == "$spot" ]]; then
-		break
-	fi
-done
-[[ "$i" != "$spot" ]] && log ERROR " Spot choiche is mandatory, you can choose between the following ones:  \n$SPOTS" && exit 1
-[[  "$image" != "maint_boot" ]] && [[ "$image" != "diag" ]] && log ERROR "The tasks must named either 'diag' or 'maint_boot'" && exit 1
-if [ $nocheck -eq 0 ]; then
-	checkRack
-	if [ $RET -eq 144 ]; then
-		exit $RET
-	fi
-fi
-bootSpecial
-exit $?
-fi
-#Actually Get the arguments
 
-while :
-do
+
+
+CheckParam() {
+
+   Help() {
+     log WARN "$(echo $1:; grep "^#@(#)" $1 | sed "s/#@(#)/  /g")"
+   }
+
+   Error() {
+      Help $0; exit $1
+   }
+ [ $# -eq 0 ] && Error 255
+ while [ $# -gt 0 ] ; do
     case "$1" in
-	-a )
-	  aixtz="$2" # You may want to check validity of $2
-	  shift 2
+        -a )
+          aixtz="$2" # You may want to check validity of $2
+          shift 2
+          ;;
+        -c )
+          nimclient="$2"   # You may want to check validity of $2
+          shift 2
+          ;;
+        -d )
+          disk="$2" # You may want to check validity of $2
+          shift 2
+          ;;
+        -g )
+          gateway="$2"   # You may want to check validity of $2
+          shift 2
+          ;;
+        -h )
+          hostname="$2"   # You may want to check validity of $2
+          shift 2
+          ;;
+        -i )
+          image="$2"
+          shift 2
+          ;;
+        -ip )
+          ipaddress="$2"
+          shift 2
+          ;;
+        -m )
+          mirror="$2"
+          shift 2
+          ;;
+        -n )
+          netmask="$2" # You may want to check validity of $2
+          shift 2
+          ;;
+        -p )
+          paging="$2" # You may want to check validity of $2
+          shift 2
+          ;;
+        -s )
+          salesOrder="$2" # You may want to check validity of $2
+          shift 2
+          ;;
+        -boot )
+          bootClient=$2
+          shift 2
+          ;;
+        -nocheck )
+          nocheck=1
+          shift 1
+          ;;
+	-spot )
+          spot=$2
+          shift 2
+          ;;
+	-x )
+	  set -x 
+          shift 1
 	  ;;
-	   -c )
-	  nimclient="$2"   # You may want to check validity of $2
-	  shift 2
+	-H ) 
+	  Error 0
+	  shift 1
 	  ;;
-	  -d )
-	  disk="$2" # You may want to check validity of $2
-	  shift 2
-	  ;;
-	  -g )
-	  gateway="$2"   # You may want to check validity of $2
-	  shift 2
-	  ;;
-      -h )
-	  hostname="$2"   # You may want to check validity of $2
-	  shift 2
-	  ;;
-      -i )
-	  image="$2"  
-	  shift 2
-	  ;;
-	  -ip )
-	  ipaddress="$2"  
-	  shift 2
-	  ;;
-	  -m )
-	  mirror="$2"  
-	  shift 2
-	  ;;
-      -n )
-	  netmask="$2" # You may want to check validity of $2
-	  shift 2
-	  ;;
-      -p )
-	  paging="$2" # You may want to check validity of $2
-	  shift 2
-	  ;;
-	  -s )
-	  salesOrder="$2" # You may want to check validity of $2
-	  shift 2
-	  ;;
-     -boot )
-	  bootClient=$2 
-	  shift 2
-	  ;;
-     -nocheck )
-	nocheck=1
-	shift 1
-        ;;
-*)	break
-;;
-	   esac
-done
+        *) Error 255 ;;
+          esac
+ done
+ [ $# -ne 0 ] && Error 255
+ ([[ -z $aixtz$disk$gateway$hostname$image$ipaddress$mirror$netmask$paging$salesOrder$bootClient$spot ]] && [[ ! -z $nimclient ]] ) && checkRack && exit $RET
+ [[ ! -z $spot ]] && bootSpecial && exit $RET	
+
+}
 
 
-# Before to check validity of arguments, we check for special jobs
-
+# Verify script parameters
+   CheckParam "$@"
 
 #Gets the environmental values
 PROGRESS=1
-getEnv
-if [ $nocheck -eq 0 ]; then
-        checkRack
-        if [ $RET -eq 144 ]; then
-                exit $RET
-        fi
-	checkMenu
-fi
-# check the arguments
-# Please note that data is not verified
-check_args
-if [ $nocheck -eq 0 ]; then
-        checkRack
-        if [ $RET -eq 144 ]; then
-                exit $RET
-        fi
-fi
 
+getEnv
+check_args
+
+if [ $nocheck -eq 0 ]; then
+        checkRack
+fi
 
 # Check The existence of related spot and obtain the resource name
 # If spot doesn't exist it will be created and if the image name is not correct it will exit 1
@@ -962,7 +885,7 @@ log INFO "Set default values for ones not specified in command line"
 [[ -z "$hostname" ]] && hostname="cas01"                                                        && log INFO "Set the hostname to '$hostname'"
 
 # generate a random unique suffix
-random=`date +%s`
+random=$(date +%s)
 
 # Set the temporary working directory
 
@@ -970,21 +893,19 @@ TMP="/tmp/"
 
 # Set the script file name
 SCRIPTFILE=$TMP$nimclient"_ech"
-SCRIPTFILEBASE=`echo ${SCRIPTFILE##*/}`
+SCRIPTFILEBASE=${SCRIPTFILE##*/}
 # Set the NIM client ip address
 
-nim_ip=`cat /etc/hosts | grep $nimclient | awk '{print $1}'`
+nim_ip=$(cat /etc/hosts | grep $nimclient | awk '{print $1}')
 
 # Get current date
 
-DATE=`date`
+DATE=$(date)
 
 # Define variables used by NIM section
 
 
-nim_server=x.x.x.205
 ftp_server=192.168.10.149
-nim_server_nim2=192.168.10.1
 
 
 PROGRESS=3 && log INFO "Starting writing postinstall script for client $nimclient"
@@ -1056,7 +977,7 @@ cat << 'EOF' >> $SCRIPTFILE
 createMonitorRecord "Deleting Etherchannels"
 #Deletes etherchannels
 echo "Deleting etherchannels"
-for curr_nic in `/usr/sbin/lsdev -t ibm_ech 2> /dev/null | awk '{ print $1 }'`
+for curr_nic in $(/usr/sbin/lsdev -t ibm_ech 2> /dev/null | awk '{ print $1 }')
 do
 tmp_val=$( echo $curr_nic | sed 's:ent:en:g' )
 /usr/sbin/ifconfig $curr_nic delete > /dev/null 2>&1
@@ -1071,8 +992,8 @@ done
 
 #Deletes adapters
 createMonitorRecord "Deleting adapters"
-echo "Deleteing adapters"
-for curr_nic in `/usr/sbin/lsdev -t en 2> /dev/null | awk '{ print $1 }'`
+echo "Deleting adapters"
+for curr_nic in $(/usr/sbin/lsdev -t en 2> /dev/null | awk '{ print $1 }')
 do
 /usr/sbin/ifconfig $curr_nic delete > /dev/null 2>&1
 /usr/sbin/chdev -l $curr_nic -a state=detach > /dev/null 2>&1
@@ -1152,88 +1073,31 @@ ftpend
 EOF
 
 cat >> $SCRIPTFILE <<'EOF'
-MACHARCH=`uname -M`
+MACHARCH=$(uname -M)
 ### Base System
-MODELTYPE=`echo $MACHARCH | cut -c5-`
+MODELTYPE=$(echo $MACHARCH | cut -c5-)
 if [ $? -eq 0 ]; then
-        MACHSERIAL=`uname -u | cut -c7-`
-        NUMPROC=`lsdev -Cc processor | wc -l`
+        MACHSERIAL=$(uname -u | cut -c7-)
+        NUMPROC=$(lsdev -Cc processor | wc -l)
         MANUFACTURER="IBM"
         MODEL=""
-	NETINTCOUNT=`lsdev -Cc if | grep en | grep -v lo0 | awk '{print $1}' | wc -l`
-        OSlevel=`oslevel`
-        SCSI=`lsdev -Cc disk | grep -vi ssa | wc -l`
-        SAS=`lsdev -Cc pdisk | wc -l`
+	NETINTCOUNT=$(lsdev -Cc if | grep en | grep -v lo0 | awk '{print $1}' | wc -l)
+        OSlevel=$(oslevel)
+        SCSI=$(lsdev -Cc disk | grep -vi ssa | wc -l)
+        SAS=$(lsdev -Cc pdisk | wc -l)
         ### Memory
-        dimm_num=`lscfg -vp | grep -E "Memory DIMM" | wc -l`
-        dimm_position=`lscfg -vp | grep -p "Memory DIMM" | grep "Physical" | awk '{print $3}'`
-        dimm_size_each=`lscfg -vp | grep  "Size"  | tr "." " " | awk '{print $2}'`
+        dimm_num=$(lscfg -vp | grep -E "Memory DIMM" | wc -l)
+        dimm_position=$(lscfg -vp | grep -p "Memory DIMM" | grep "Physical" | awk '{print $3}')
+        dimm_size_each=$(lscfg -vp | grep  "Size"  | tr "." " " | awk '{print $2}')
         RAM_tot=0
         for mem in $dimm_size_each
         do
                 RAM_tot=$(($RAM_tot+$mem))
         done
- #       RAM_tot=`expr $RAM_tot / 1024`
+ #       RAM_tot=$(expr $RAM_tot / 1024)
 fi
 
 EOF
-
-# SET NETWORKING IF IPADDRESS ARGS IS HERE
-
-
-if [[ ! -z $ipaddress ]] && [[ !  -z $netmask  ]] && [[ ! -z $gateway  ]]
-then
-base_ip=$ipaddress
-
-cat << EOF >> $SCRIPTFILE
-### DECLARE VARIABLE ###
-
-        typeset prim_ada=\"en0\"
-        typeset sec_ada=\"NONE\"
-        typeset ech_ada=\":ech_name:\"
-        typeset clt=\"$hostname\"
-        typeset client_ip=\"$base_ip\"
-        typeset netm=\"$netmask\"
-        typeset gateway=\"$gateway\"
-        typeset tmp_val=\"\"
-        typeset if_type=\"direct\"
-        typeset domain=\"NONE\"
-        typeset nameserver=\"NONE\"
-### END OF DECLARE VARIABLE ###
-### SET IP ADDRESS FORCE ###
-        if [ \"\$if_type\" = 'ech' ]
-        then
-        tmp_val=\$(
-                        /usr/sbin/lsdev -Cc if | \
-                        awk ' \$1 ~ /^[ \\t]*en[0-9]+\$/ { gsub(/en/, \"\", \$1) ; print \$1 } ' | \\
-                        sort
-                  )
-        tmp_val=\$( echo \$tmp_val | awk ' { print \$NF } ' )
-        tmp_val=\"en\${tmp_val}\"
-        else
-        tmp_val=\$( echo \$prim_ada | sed 's:ent:en:g' )
-        fi
-
-        [ \"\$netm\" = 'NONE' ] && netm=\"\" || netm=\" -m \\\"\$netm\\\"\"
-        [ \"\$nameserver\" = 'NONE' ] && nameserver=\"\" || nameserver=\" -n \\\"\$nameserver\\\"\"
-        [ \"\$domain\" = 'NONE' ] && domain=\"\" || domain=\" -d \\\"\$domain\\\"\"
-        [ \"\$gateway\" = 'NONE' ] && gateway=\"\" || gateway=\" -g \\\"\$gateway\\\"\"
-
-        /usr/sbin/mktcpip -h \"\$clt\" -a \"\$client_ip\" \$netm -i \"\$tmp_val\" \$nameserver \$domain \$gateway -A'no' -t'N/A' -s''
-
-        [ -x \"/etc/rc.d/init.d/firstboot\" ] && \\
-                /etc/rc.d/init.d/firstboot
-
-### END OF SET IP ADDRESS FORCE ###
-### UPDATE HOSTS FILE ####
-createMonitorRecord \"Updating Hosts file ...\"
-EOF
-pattern=$(echo $base_ip | awk -F "." '{print $1"."$2"."$3}')
-cat << EOF >> $SCRIPTFILE
-sed 's/10.0.129/'$pattern'/g' /etc/hosts > /tmp/hosts
-mv /tmp/hosts /etc/hosts
-EOF
-fi
 
 ## NOW START THE SECOND PART OF POSTINSTALL SCRIPT
 
@@ -1302,7 +1166,7 @@ then
 
     #If there is a reboot, force the rootvg sync.
     echo \"#! /usr/bin/ksh\" > /home/root/sync_mirr_once
-    echo \"([ -z \"\`/usr/sbin/fuser /usr/sbin/syncvg 2>/dev/null\`\" ] && /usr/sbin/syncvg -v rootvg > /dev/null 2>&1 )& > /dev/null 2>&1\" >> /home/root/sync_mirr_once
+    echo \"([ -z \"\$(/usr/sbin/fuser /usr/sbin/syncvg 2>/dev/null)\" ] && /usr/sbin/syncvg -v rootvg > /dev/null 2>&1 )& > /dev/null 2>&1\" >> /home/root/sync_mirr_once
     echo \"/usr/sbin/rmitab sync_mirr\" >> /home/root/sync_mirr_once
     echo \"rm /home/root/sync_mirr_once\" >> /home/root/sync_mirr_once
     /usr/bin/chmod +x /home/root/sync_mirr_once
@@ -1318,12 +1182,11 @@ if [  ! -z $paging ];
 		then 
 
 cat << EOF >> $SCRIPTFILE
-createMonitorRecord \"Adjusting paging size\"
+createMonitorRecord "Adjusting paging size"
 #START CHANGE PAGING SIZE
 
-pp_size=\`lslv hd6 | grep \"PP SIZE\" | awk '{print \$6}'\`
-curr_paging_size=\`lsps -a | tail -1  | awk '{print \$4}' | awk -F \"M\" '{print \$1}
-'\`
+pp_size=\$(lslv hd6 | grep \"PP SIZE\" | awk '{print \$6}')
+curr_paging_size=\$(lsps -a | tail -1  | awk '{print \$4}' | awk -F \"M\" '{print \$1}')
 curr_pp_paging_size=\$(( \$curr_paging_size / \$pp_size ))
 wanted_pp_paging_size=\$(( $paging * 1024 / \$pp_size))
 diff_pp_paging_size=\$(( \$wanted_pp_paging_size - \$curr_pp_paging_size ))
@@ -1344,15 +1207,15 @@ fi
 
 cat << EOF >> $SCRIPTFILE
 createMonitorRecord "Set parameters for serial console. "
-echo "change the vty0/vty1 attributes in order to enable login from text console at next reboot (thanks to ibm support)"
+echo \"change the vty0/vty1 attributes in order to enable login from text console at next reboot (thanks to ibm support)\"
 chdev -l vty0 -a runmodes='hupcl,cread,brkint,icrnl,opost,tab3,onlcr,isig,icanon,echo,echoe,echok,echoctl,echoke,imaxbel,iexten,clocal' -a logmodes='hupcl,cread,echoe,cs8,clocal' -P
 chdev -l vty1 -a runmodes='hupcl,cread,brkint,icrnl,opost,tab3,onlcr,isig,icanon,echo,echoe,echok,echoctl,echoke,imaxbel,iexten,clocal' -a logmodes='hupcl,cread,echoe,cs8,clocal' -P
 echo " cleaning /etc directory from unecessary first boot files "
 rm -f /etc/fb_*
-echo "adjusting the swap partition to hd6"
+echo \"adjusting the swap partition to hd6\"
 swapon /dev/hd6
 tmppaging=\$( lsvg -l rootvg | grep paging00)
-if [[ ! \$tmppaging == \'\' ]]; then 
+if [[ ! \$tmppaging == '' ]]; then 
 swapoff /dev/paging00
 rmps paging00
 fi
@@ -1377,7 +1240,7 @@ createMonitorRecord "Deleting adapter again to set to customer values and reboot
 #Stops tcpip group subsystem
 /usr/bin/stopsrc -g tcpip > /dev/null 2>&1
 #Deletes etherchannels
-for curr_nic in \`/usr/sbin/lsdev -t ibm_ech 2> /dev/null | awk '{ print \$1 }'\`
+for curr_nic in \$(/usr/sbin/lsdev -t ibm_ech 2> /dev/null | awk '{ print \$1 }')
 do
 tmp_val=\$( echo \$curr_nic | sed 's:ent:en:g' )
 /usr/sbin/ifconfig \$curr_nic delete > /dev/null 2>&1
@@ -1391,18 +1254,22 @@ tmp_val=\$( echo \$curr_nic | sed 's:ent:en:g' )
 done
 
 #Deletes adapters
-for curr_nic in \`/usr/sbin/lsdev -t en 2> /dev/null | awk '{ print \$1 }'\`
+for curr_nic in \$(/usr/sbin/lsdev -t en 2> /dev/null | awk '{ print \$1 }')
 do
 /usr/sbin/ifconfig \$curr_nic delete > /dev/null 2>&1
 /usr/sbin/chdev -l \$curr_nic -a state=detach > /dev/null 2>&1
 /usr/bin/odmdelete -o CuAt -q name=\"\$curr_nic\" > /dev/null 2>&1
 done
 ### END OF DELETE OBJECTS ###
+
+EOF
 # SET NETWORKING IF IPADDRESS ARGS IS HERE
 
 
 if [[ ! -z $ipaddress ]] && [[ !  -z $netmask  ]] && [[ ! -z $gateway  ]]
 then
+
+cat << EOF >> $SCRIPTFILE
 base_ip=$ipaddress
 
 ### DECLARE VARIABLE ###
@@ -1411,7 +1278,7 @@ base_ip=$ipaddress
         typeset sec_ada=\"NONE\"
         typeset ech_ada=\":ech_name:\"
         typeset clt=\"$hostname\"
-        typeset client_ip=\"$base_ip\"
+        typeset client_ip=\"$ipaddress\"
         typeset netm=\"$netmask\"
         typeset gateway=\"$gateway\"
         typeset tmp_val=\"\"
@@ -1444,13 +1311,22 @@ base_ip=$ipaddress
                 /etc/rc.d/init.d/firstboot
 
 
-fi
 ### END OF SET IP ADDRESS FORCE ###
 
+### UPDATE HOSTS FILE ####
+createMonitorRecord \"Updating Hosts file and REBOOT\"
+EOF
+cat << EOF >> $SCRIPTFILE
+pattern=\$(echo \$base_ip | awk -F "." '{print \$1\".\"\$2\".\"\$3}')
+echo "$hostsFile" >> /etc/hosts
+sed 's/10.0.142/'\$pattern'/g' /etc/hosts > /tmp/hosts
+mv /tmp/hosts /etc/hosts
 
 ### REBOOT!!!!!!! ###
 /usr/sbin/shutdown -Fr
 EOF
+fi
+
 PROGRESS=4 && log INFO "Finish to create the postinstall script file"
 
 
@@ -1474,18 +1350,14 @@ PROGRESS=5 && log INFO "Changing the image.data file to be suitabble to restore"
 #*******                                                                                ******#
 #*******                                                                                ******#
 #*********************************************************************************************#
-cat_ps_size=$paging      # Paging size ( it depends on the RAM)
-cat_pv_size=$disk      # disk size in GB
 img_data=/tmp/image_data_$random
 image_data_clean=image_data_$random    # the basename of image.data
 tab_res=/tmp/tab_res.$random
 bos_inst=/data/backup/bosinst
 typeset -i meter=1
 # get the real image_dat
-location=`lsnim -l $image | grep location | awk '{print $3}'`
-image_clean=$(basename `echo $location`)
-
-
+location=$($LSNIM -l $image | grep location | awk '{print $3}')
+image_clean=$(basename $location)
 
 image_data=${location%$image_clean}image.data
 base_dir=${location%$image_clean}
@@ -1528,7 +1400,7 @@ do
     [ -z "$curr_pp" ] && continue
     [ -z "$curr_lv_min_lps" ] && continue
 
-    curr_size_in_mb=`echo "( $curr_pp / $curr_copies ) * $curr_pp_size" | bc`
+    curr_size_in_mb=$(echo "( $curr_pp / $curr_copies ) * $curr_pp_size" | bc)
     min_size_in_mb="1024"
 
     target_disk_size=$(( $target_disk_size + $curr_size_in_mb ))
@@ -1591,14 +1463,10 @@ cat $tab_res | \
         do
           curr_name=""
           curr_name_for_awk=""
-          curr_nb=""
           curr_wanted_size=""
-
-          curr_nb=$( echo $curr_cfg | awk '{ print $1 }' )
           curr_name=$( echo $curr_cfg | awk '{ print $2 } ' )
           curr_name_for_awk=$( echo $curr_name | sed 's:/:\\/:g' )
           curr_size=$( echo $curr_cfg | awk '{ print $3 } ' )
-          curr_min_size=$( echo $curr_cfg | awk '{ print $4 } ' )
           curr_wanted_size=$curr_size
 
           if [ ! "$curr_name" = 'paging' ]
@@ -1689,9 +1557,9 @@ cat  $img_data | while read LINE ; do
     echo "COPIES= 1"
   else
     if [[ $COPIESFLAG -eq 1 ]] ; then
-      PP=`echo ${LINE} | awk '{print $1}'`
+      PP=$(echo ${LINE} | awk '{print $1}')
       if [ "${PP}" = "PP=" ] ; then
-        PPNUM=`echo ${LINE} | awk '{print $2}'`
+        PPNUM=$(echo ${LINE} | awk '{print $2}')
         ((PPNUMNEW=$PPNUM/2))
         echo "PP= ${PPNUMNEW}"
         COPIESFLAG=0
@@ -1736,7 +1604,7 @@ nim -Fo change -a cpuid= $nimclient > /dev/null 2>&1
 
 
 ### Define the fb_script resource if not set
-FBSCRIPT=$(lsnim | grep "$SCRIPTFILEBASE")
+FBSCRIPT=$($LSNIM | grep "$SCRIPTFILEBASE")
 if [ -z "$FBSCRIPT" ]
 then
 nim -o define -t fb_script -a server=master \
@@ -1744,19 +1612,19 @@ nim -o define -t fb_script -a server=master \
 fi
 
 #Reset before to allocate
-PROGRESS=7 && log INFO "Resetting resources before to allocate"
-nim -F -o reset $nimclient 
-nim -o deallocate -a subclass=all $nimclient
+ PROGRESS=7 && log INFO "Resetting resources before to allocate"
+ nim -F -o reset $nimclient 
+ nim -o deallocate -a subclass=all $nimclient
 # trim $SPOT var....
-SPOT=$(print "$SPOT" | nawk '{gsub(/^[ ]*/,"",$0); gsub(/[ ]*$/,"",$0) ; print }')
+ SPOT=$(print "$SPOT" | nawk '{gsub(/^[ ]*/,"",$0); gsub(/[ ]*$/,"",$0) ; print }')
 
 
 
 
-log INFO "Instanciating restore on $nimclient ......"
+ log INFO "Instanciating restore on $nimclient ......"
 # Allocate restore resource
 
-/usr/sbin/nim -o bos_inst \
+ /usr/sbin/nim -o bos_inst \
            -a source=mksysb \
            -a bosinst_data=bosinst_data_def \
            -a image_data=$image_data_clean \
@@ -1767,28 +1635,23 @@ log INFO "Instanciating restore on $nimclient ......"
            -a no_client_boot=yes \
            -a accept_licenses=yes \
         $nimclient
-ret=$?
-if [ $ret -ne 0 ]; then
-PROGRESS=100 && log ERROR "An error occured launching the nim -o bosinst command"
-exit $ret
-else
-if [ ! -z "$bootClient" ]; then
-log WARN "Power on the client $nimclient in $bootClient mode"
-PROGRESS=8 && log WARN "This script is started in background to avoid to wait for the end (it takes around 4 minutes)"
-powerOnAndInstall &
-fi
-fi
+ ret=$?
+ if [ $ret -ne 0 ]; then
+	PROGRESS=100 && log ERROR "An error occured launching the nim -o bosinst command"
+	exit $ret
+ fi
+ log INFO "Good, BOS install is scheduled now, waiting for client to  boot..."
 
 
 # check mksysb installation
 # I cannot build a function here because backgrounding brokes the script
-PK="["$salesOrder"]["$nimclient"]"
-URI="http://$APISERVER/SPOT/provisioning/api/provisioningnotifications/$PK"
-COUNTER=0
-CMD="$LSNIM -l $nimclient"
-OLDPROGRESS=$PROGRESS
-while :
-do
+ PK="["$salesOrder"]["$nimclient"]"
+ URI="http://$APISERVER/SPOT/provisioning/api/provisioningnotifications/$PK"
+ COUNTER=0
+ CMD="$LSNIM -l $nimclient"
+ OLDPROGRESS=$PROGRESS
+ while :
+ do
         CSTATE=$($CMD | grep "Cstate" | awk -F "=" '{print  $2}')
         MSTATE=$($CMD | grep "Mstate" | awk -F "=" '{print  $2}')
         INFO=$($CMD |  grep "info" | awk -F " " '{print $5}') 
@@ -1821,14 +1684,14 @@ do
         }"
 
         # Write monitoring infos to web service
-SEND  >/dev/null 2>&1
+ 	SEND  >/dev/null 2>&1
 
         # check the percent if is 100%
         if [[ $PROGRESS -eq 100 ]] || [[ $COUNTER -eq 240 ]]; then
                 break
         fi
-sleep 15
-done  >/dev/null 2>&1  &
+ sleep 15
+ done  >/dev/null 2>&1  &
 
 
 # End of file

@@ -71,8 +71,6 @@
 10.0.142.243	acs01
 10.0.142.250	vpn01
 10.0.142.252	fw01 router01
-10.0.142.253	fw01mstmgt             # FW Cluster Master
-10.0.142.254	fw01slvmgt	       # FW Cluster Slave
 10.0.142.255    broadcast broadcasthost
 
 # ENTT Network
@@ -85,4 +83,3 @@
 192.168.2.231	esw01.entt
 192.168.2.232	esw02.entt
 192.168.2.252	fw01.entt router01.entt
-10.0.142.221 	 mdi01 mdi01.ctrl 
