@@ -163,6 +163,7 @@ esac
 #SET Installationip var for logging in the dashboard
 INSTALLATIONIP="<table class='collection table table-bordered'>
                         <tr><th>Bootp ip</th><td>$bootpip</td></tr>
+			<tr><th>Server Nim</th><td>$nimserver</td></tr>
                         <tr><th>Cyclades:Port</th><td>$cycladesip : $cycladesport</td></tr>
                         <tr><th>Switch - Port</th><td>$switchip - $switchport</td></tr>
               </table>"
@@ -171,37 +172,10 @@ INSTALLATIONIP="<table class='collection table table-bordered'>
 log INFO "The env values for cyclades are $CYCLADES and for switches $switch_maps"
 }
 
-
-
-# Usage function
-usage () {
-log INFO "
-usage $0 
--a [aixtz]  
--c [nimclient] 
--d [disksize(GB)] 
--g [default gateway] 
--h [hostname] 
--i [image name] 
--ip [ip address] 
--m [mirror:0|1] 
--n [netmask] 
--p [paging size] 
--s [sales order number]
--boot [normal|factory (default to not initiate boot)]
--nocheck (without values args.) If you don't want to check for nimclient validity for ex. to install LPAR that physically are not placed on a rack shelf
-"
-log INFO "Only 3 parameters are mandatory: -a [aixtz] -c [nimclient] -i [image name]"
-log WARN "If only the [-c nimclient] parameter is given, the script check if the connection is ok"
-log WARN "To boot in diag or maintenance mode, only three parameters are needed: -c nimclient -i [diag|maint_boot] -spot [spot name]. note that if -spot is empty, it will return a list of possible object"
-
-check_args
-}
-
 # Checks if the mandatory arguments are all here
 check_args() {
 #put here the mandatory params
-([[ -z "$image" ]] || [[ -z "$aixtz"  ]] || [[ -z "$nimclient"  ]] ) && nimclient="usage" && log ERROR "Some mandatory parametrs missing!!!!!" && log INFO "Type $0 without arguments to grab usage." && exit 1
+([[ -z "$image" ]] || [[ -z "$aixtz"  ]] || [[ -z "$nimclient"  ]] ) &&  log ERROR "Some mandatory parametrs missing!!!!!" && log INFO "Type $0 without arguments to grab usage." && exit 1
  valid_ip $ipaddress && [ "$ERROR" -ne 0 ] && log ERROR "Ip address not valid" && exit 1
  valid_ip $netmask && [ "$ERROR" -ne 0 ] && log ERROR "Netmask not valid" && exit 1
  valid_ip $gateway && [ "$ERROR" -ne 0 ] && log ERROR "Gateway not valid" && exit 1
@@ -247,11 +221,13 @@ log() {
     URI="http://$APISERVER/SPOT/provisioning/api/events"
     METHOD="POST"
   else
-    REST='{"returnstdout" : "|'"$hostNAME"'| '"$line"'"}'
+    REST='{"returnstdout" : "|'"$nimclient"'| '"$line"'"}'
     URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
     METHOD="POST"
+    COMMANDURI="<button class='btn btn-mini command' url='/SPOT/provisioning/api/remotecommands/$ID'>Details..</button> "
+    
  fi
-
+    line="$line<p>$COMMANDURI</p>"
 
  (
 perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
@@ -848,7 +824,7 @@ CheckParam() {
           esac
  done
  [ $# -ne 0 ] && Error 255
- ([[ -z $aixtz$disk$gateway$hostname$image$ipaddress$mirror$netmask$paging$salesOrder$bootClient$spot ]] && [[ ! -z $nimclient ]] ) && checkRack && exit $RET
+ ([[ -z $aixtz$disk$gateway$hostname$image$ipaddress$mirror$netmask$paging$salesOrder$bootClient$spot ]] && [[ ! -z $nimclient ]] ) && getEnv && checkRack && exit $RET
  [[ ! -z $spot ]] && bootSpecial && exit $RET	
 
 }
@@ -950,9 +926,11 @@ print $req->as_string;
 }
 
 createMonitorRecord () {
- status="Postinstall Script<br />: $1"
+ status="Postinstall Script:<br /> $1"
+ line="$1"
 EOF
 cat << EOF >> $SCRIPTFILE
+ status="$status<p>$COMMANDURI</p>"
  PK="["$salesOrder"]["$nimclient"]"
  URI="http://$ftp_server/SPOT/provisioning/api/provisioningnotifications/$PK"
 EOF
@@ -970,6 +948,18 @@ cat << 'EOF' >> $SCRIPTFILE
         }"
 
         SEND >/dev/null 2>&1
+EOF
+  if [[ "$ID" != "" ]]; then
+cat << 'EOF' >> $SCRIPTFILE
+    REST='{"returnstdout" : "$line"}'
+EOF
+cat << EOF >> $SCRIPTFILE
+    URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
+    METHOD="POST"
+    SEND >/dev/null 2>&1
+EOF
+ fi
+cat << EOF >> $SCRIPTFILE
 }
 EOF
 
