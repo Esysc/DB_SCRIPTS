@@ -115,7 +115,7 @@ sshExe() {
   #
   # $2 command or function
   if [[ "$hostNAME" == "" ]]; then
-	hostNAME=$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -tt root@$1 " hostname ")
+	hostNAME=$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null  root@$1 " hostname ")
         hostNAME=$(echo "$hostNAME"| tr -d '\040\011\012\015')
   fi
   log INFO "$2"

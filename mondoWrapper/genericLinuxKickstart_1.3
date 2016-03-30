@@ -37,6 +37,8 @@ KSDEFAULTNAME="nagra-ks.cfg"
 PXEBOOTDIR="/var/www/BOOT"
 WEBSERVER="http://x.x.x.203"
 DRBL="x.x.x.203"
+typeset ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
+typeset APISERVER="spmgt.my.comp.ltd"
 # Find the mac address of this machine, pxe boot file and ks.cfg will be named in this way
 
 MAC=$(ifconfig -a | 

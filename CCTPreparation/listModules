@@ -6,7 +6,7 @@
 
 
 RELEASE=$1
-MODULEPATTERN="NSE NGE NOE NSM"
+MODULEPATTERN="NSE NGE NSM NRE NOE"
 
 FIND=$(which find)
 OPTIONS="-maxdepth 2 -type d -name "
