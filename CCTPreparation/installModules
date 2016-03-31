@@ -114,10 +114,6 @@ sshExe() {
   # $1 client ip
   #
   # $2 command or function
-  if [[ "$hostNAME" == "" ]]; then
-	hostNAME=$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null  root@$1 " hostname ")
-        hostNAME=$(echo "$hostNAME"| tr -d '\040\011\012\015')
-  fi
   log INFO "$2"
   log INFO "$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -tt root@$1 " $2 ")" 
   if [[ $? -ne 0 ]]
@@ -132,7 +128,12 @@ getHostname() {
 
 #Get the hostname of the conecerned host
 
-sshExe $host hostname
+  if [[ "$hostNAME" == "" ]]; then
+        hostNAME=$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -f root@$1 " hostname ")
+        hostNAME=$(echo "$hostNAME"| tr -d '\040\011\012\015')
+  fi
+
+
 
 }
 copyModules () {
