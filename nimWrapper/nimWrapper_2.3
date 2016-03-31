@@ -1638,12 +1638,12 @@ fi
 # check mksysb installation
 # I cannot build a function here because backgrounding brokes the script
  PK="["$salesOrder"]["$nimclient"]"
- URI="http://$APISERVER/SPOT/provisioning/api/provisioningnotifications/$PK"
  COUNTER=0
  CMD="$LSNIM -l $nimclient"
  OLDPROGRESS=$PROGRESS
  while :
  do
+	URI="http://$APISERVER/SPOT/provisioning/api/provisioningnotifications/$PK"
 	METHOD="PUT"
         CSTATE=$($CMD | grep "Cstate" | awk -F "=" '{print  $2}')
         MSTATE=$($CMD | grep "Mstate" | awk -F "=" '{print  $2}')
