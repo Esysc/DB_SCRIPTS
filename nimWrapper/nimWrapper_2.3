@@ -67,7 +67,8 @@ typeset LSNIM=$(which lsnim)
 typeset expectserver="spmgt.my.comp.ltd"
 typeset hostsFile="$(cat /data/backup/hosts)"
 typeset ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
-
+export ID
+export TERM=vt100
 #Determine the nim ip address (in the case we have more than one nim)
 #this value is than use to set SMS nim server value to boot of
 NIMNET=$($LSNIM -l Network1 | grep net_addr | awk  -F "=" '{print $2}' | cut -c 1-8)
@@ -1223,7 +1224,7 @@ createMonitorRecord "Adjusting TZ values "
 EOF
 
 cat << EOF >> $SCRIPTFILE
-createMonitorRecord "Deleting adapter again to set to customer values and rebooting (final action) -- *****REBOOT*****"
+createMonitorRecord "Deleting adapter again to set to customer values "
 
 ### END OF SETTING HOST FILE AND RUN INVENTORY VIA FTP###
 ### DELETE OBJECTS AGAIN ###
@@ -1305,7 +1306,7 @@ base_ip=$ipaddress
 ### END OF SET IP ADDRESS FORCE ###
 
 ### UPDATE HOSTS FILE ####
-createMonitorRecord \"Updating Hosts file and REBOOT\"
+createMonitorRecord \"Updating Hosts file and <br>************************  REBOOT **************************\"
 EOF
 cat << EOF >> $SCRIPTFILE
 pattern=\$(echo \$base_ip | awk -F "." '{print \$1\".\"\$2\".\"\$3}')
@@ -1635,56 +1636,25 @@ fi
 
 
 # check mksysb installation
-# I cannot build a function here because backgrounding brokes the script
- PK="["$salesOrder"]["$nimclient"]"
  COUNTER=0
  CMD="$LSNIM -l $nimclient"
  OLDPROGRESS=$PROGRESS
  while :
  do
-	URI="http://$APISERVER/SPOT/provisioning/api/provisioningnotifications/$PK"
-	METHOD="PUT"
         CSTATE=$($CMD | grep "Cstate" | awk -F "=" '{print  $2}')
         MSTATE=$($CMD | grep "Mstate" | awk -F "=" '{print  $2}')
-        INFO=$($CMD |  grep "info" | awk -F " " '{print $5}') 
+        INFO=$($CMD |  grep "info" | awk -F " " '{print $5}')  #This one to grab the progress percentage
         INFOS=$($CMD |  grep "info")
 	if [[ "$CSTATE" == *"ready"* ]]; then
 		PROGRESS=100
 	else
         	PROGRESS=$(echo ${INFO%?})
 		if [ $PROGRESS -eq 0 ]; then
-			PROGRESS=$OLDPROGRESS  # Takes rthe old value ot the one read from nim server (0)
+			PROGRESS=$OLDPROGRESS  # Takes the old value or the one read from nim server (0)
    		fi
 	fi
         COUNTER=$((COUNTER + 1))
-        REST="{
-        \"notifid\":\"$PK\",
-        \"hostname\":\"$hostname\",
-        \"installationip\":\"$INSTALLATIONIP\",
-        \"configuredip\":\"$ipaddress\",
-        \"status\":\"<b>$CSTATE<br />$MSTATE<br />$INFOS</b><br />$COMMANDURI\",
-        \"progress\":\"$PROGRESS\",
-        \"image\":\"$image\",
-        \"firmware\":\"IBM OpenFirmware\",
-        \"ram\":\"N/D\",
-        \"cpu\":\"N/D\",
-        \"diskscount\":\"N/D\",
-        \"netintcount\":\"N/D\",
-        \"model\":\"N/D\",
-        \"serial\":\"N/D\",
-        \"os\":\"$SPOT\"
-        }"
-
-        # Write monitoring infos to web service
- 	SEND  >/dev/null 2>&1
-	if [[ "$ID" != "" ]]; then
-		line="$CSTATE $MSTATE $INFOS"
-    		REST='{"returnstdout" : "|'"$nimclient"'| '"$line"'"}'
-    		URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
-    		METHOD="POST"
-		 SEND  >/dev/null 2>&1
-
- 	fi
+        log INFO "<p> $CSTATE </p><p> $MSTATE </p><p> $INFOS </p>"
         # check the percent if is 100%
         if [[ $PROGRESS -eq 100 ]] || [[ $COUNTER -eq 240 ]]; then
                 break
