@@ -966,7 +966,7 @@ cat << EOF >> $SCRIPTFILE
 EOF
 
 cat << 'EOF' >> $SCRIPTFILE
-createMonitorRecord "Deleting Etherchannels"
+createMonitorRecord "Deleting Etherchannels and adapters"
 #Deletes etherchannels
 echo "Deleting etherchannels"
 for curr_nic in $(/usr/sbin/lsdev -t ibm_ech 2> /dev/null | awk '{ print $1 }')
@@ -983,7 +983,6 @@ tmp_val=$( echo $curr_nic | sed 's:ent:en:g' )
 done
 
 #Deletes adapters
-createMonitorRecord "Deleting adapters"
 echo "Deleting adapters"
 for curr_nic in $(/usr/sbin/lsdev -t en 2> /dev/null | awk '{ print $1 }')
 do
