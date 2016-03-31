@@ -914,14 +914,15 @@ use LWP;
 
 my $REST = shift;
 my $uri = shift;
+my $method = shift;
 my $lwp = LWP::UserAgent->new(
                         timeout               => 10,
 );
-my $req = HTTP::Request->new( "PUT", "$uri" );
+my $req = HTTP::Request->new( $method, "$uri" );
 $req->content($REST);
 my $resp = $lwp->request($req);
 print $req->as_string;
-' "$REST" "$URI"
+' "$REST" "$URI" "$METHOD"
 
 }
 
@@ -930,9 +931,10 @@ createMonitorRecord () {
  line="$1"
 EOF
 cat << EOF >> $SCRIPTFILE
- status="$status<p>$COMMANDURI</p>"
- PK="["$salesOrder"]["$nimclient"]"
+ status="\$status<p>$COMMANDURI</p>"
+ PK="[$salesOrder][$nimclient]"
  URI="http://$ftp_server/SPOT/provisioning/api/provisioningnotifications/$PK"
+ METHOD="PUT"
 EOF
 cat << 'EOF' >> $SCRIPTFILE
 	REST="{
@@ -951,10 +953,10 @@ cat << 'EOF' >> $SCRIPTFILE
 EOF
   if [[ "$ID" != "" ]]; then
 cat << 'EOF' >> $SCRIPTFILE
-    REST='{"returnstdout" : "$line"}'
+    REST='{"returnstdout" : "'"$line"'"}'
 EOF
 cat << EOF >> $SCRIPTFILE
-    URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
+    URI="http://$ftp_server/SPOT/provisioning/api/logWrapper/$ID"
     METHOD="POST"
     SEND >/dev/null 2>&1
 EOF
@@ -1642,6 +1644,7 @@ fi
  OLDPROGRESS=$PROGRESS
  while :
  do
+	METHOD="PUT"
         CSTATE=$($CMD | grep "Cstate" | awk -F "=" '{print  $2}')
         MSTATE=$($CMD | grep "Mstate" | awk -F "=" '{print  $2}')
         INFO=$($CMD |  grep "info" | awk -F " " '{print $5}') 
@@ -1660,7 +1663,7 @@ fi
         \"hostname\":\"$hostname\",
         \"installationip\":\"$INSTALLATIONIP\",
         \"configuredip\":\"$ipaddress\",
-        \"status\":\"<b>$CSTATE<br />$MSTATE<br />$INFOS</b>\",
+        \"status\":\"<b>$CSTATE<br />$MSTATE<br />$INFOS</b><br />$COMMANDURI\",
         \"progress\":\"$PROGRESS\",
         \"image\":\"$image\",
         \"firmware\":\"IBM OpenFirmware\",
@@ -1675,7 +1678,14 @@ fi
 
         # Write monitoring infos to web service
  	SEND  >/dev/null 2>&1
+	if [[ "$ID" != "" ]]; then
+		line="$CSTATE $MSTATE $INFOS"
+    		REST='{"returnstdout" : "|'"$nimclient"'| '"$line"'"}'
+    		URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
+    		METHOD="POST"
+		 SEND  >/dev/null 2>&1
 
+ 	fi
         # check the percent if is 100%
         if [[ $PROGRESS -eq 100 ]] || [[ $COUNTER -eq 240 ]]; then
                 break
