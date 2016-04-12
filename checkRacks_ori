@@ -5,7 +5,7 @@
 #
 #
 #
-APISERVER=x.x.x.204
+
 checkRackBootp () {
 # exit 144 => no connection
 # exit 145 => asmi presents
@@ -45,16 +45,18 @@ close
 expect eof
 EXP
 RET=$?
-[[ $RET -eq 144 ]] && log WARN "I can't detected a IBM client on $rackPosition . Reasons: Telnet connection not available, wrong rack or this is a dhcp client (not console). Going to check for this..." && checkRackDhcp 
-[[ $RET -eq 145 ]] && log INFO "Good! A IBM client has been detected"  && writeInDb 1 "BOOTP"  "$bootpip"  "$nimclient" && exit 0
+[[ $RET -eq 144 ]] && log WARN "I can't detected a IBM client on $nimclient . Check if the telnet connection is not owned by something else" 
+[[ $RET -eq 145 ]] && log INFO "Good! A IBM client has been detected"  && writeInDb 1 && exit 0
 #echo $RET
 }
 
 checkRackDhcp () {
+nimclient=$(ssh x.x.x.205 "lsnim -c machines | grep $rackPosition")
 valid_ip $rackPosition
- [[ -z "$bootpip" ]] &&  [ $ERROR -ne 0 ]   && log ERROR "Hey, this client doesn't exists ...! check your spelling" && exit 1
+ [[ -z "$nimclient" ]] &&  [ $ERROR -ne 0 ]   && log ERROR "Hey, this client doesn't exists ...! check your spelling" && exit 1
 
 RET=145
+#check valid client
 valid_ip $rackPosition
 
 clientIP=$(findIPMAC $rackPosition "IP" 2>/dev/null | head -1)
@@ -64,23 +66,22 @@ if [[ "$clientIP" != "" ]]; then
         if [[ $PING -ne 0 ]] ; then
                 RET=144
                 log ERROR "I didn't found any pxe client at/on $rackPosition" 
-		writeInDb 4 "UNDEFINED" 
+		writeInDb 4
         else
                 log INFO "Good! the client is a valid pxe client and it is well connected."
-		writeInDb 2 "DHCP" "$clientIP"
+		writeInDb 2
         fi
 else
         RET=144
         log ERROR "I didn't found any pxe client at/on $rackPosition"
-	writeInDb 4 "UNDEFINED"
+	writeInDb 4
 fi
-exit $RET
 }
 
 #function to update db infos on racks
 writeInDb () {
-REST='{"idracks":"'$rackPosition'","reponse":"'$1'", "machinetype":"'$2'", "ipaddress":"'$3'"}'
-uri="http://$APISERVER/SPOT/provisioning/api/sysprodracks/$rackPosition"
+REST='{"idracks":"'$rackPosition'","reponse":"'$1'"}'
+uri="http://x.x.x.204/SPOT/provisioning/api/sysprodracks/$rackPosition"
 (
 perl - "$REST"  "$uri" <<'_HERE_'
 use integer;
@@ -113,6 +114,42 @@ print $req->as_string;
 #print Dumper $resp;
 _HERE_
 )   >/dev/null 2>&1
+
+timestamps=$(date '+%F %T')
+REST='{"salesorder":"'"$rackPosition"'","status":"OK","data":"'"$clientIP"'","creator":"1","message":"Dhcp Ip address","timestamps":"'"$timestamps"'","dwprocessed":"1"}'
+uri="http://x.x.x.204/SPOT/provisioning/api/tempdata/$rackPosition"
+(
+perl - "$REST"  "$uri" <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $REST = shift;
+my $uri = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( 'PUT', "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+_HERE_
+)   >/dev/null 2>&1 
 
 }
 
@@ -224,10 +261,10 @@ echo -e "\e[${code}m${line}\e[0m"
 else
 echo "$line"
 fi >&2
-URI="http://$APISERVER/SPOT/provisioning/api/events"
+
 REST='{"title":"'`basename $0`' | '$rackPosition'","content":"'$line'","userid":"'$(whoami)'","date":"'$(date)'"}'
 (
-perl - "$REST"  "$URI" <<'_HERE_'
+perl - "$REST"  <<'_HERE_'
 use integer;
 use POSIX qw(strftime);
 use Backticks;
@@ -246,8 +283,8 @@ use HTTP::Cookies;
 use HTTP::Request;
 use LWP;
 use File::Path qw{mkpath};
+my $uri = "http://x.x.x.204/SPOT/provisioning/api/events";
 my $REST = shift;
-my $uri = shift;
 my $lwp = LWP::UserAgent->new(
                         timeout               => 10,
 );
@@ -267,8 +304,9 @@ check_args() {
 #put here the mandatory params
 ([[  -z "$rackPosition" ]] ) && rackPosition="usage"  && log ERROR "Some mandatory parameters missing!!!!!" && usage && exit 1
  #check valid client
+nimclient=$(ssh x.x.x.205 "lsnim -c machines | grep $rackPosition")
 valid_ip $rackPosition
- [[ -z "$bootpip" ]] &&  [ $ERROR -ne 0 ]   && log ERROR "Hey, this client doesn't exists ...! check your spelling" && exit 1
+ [[ -z "$nimclient" ]] &&  [ $ERROR -ne 0 ]   && log ERROR "Hey, this client doesn't exists ...! check your spelling" && exit 1
  #check valid TaskID
 }
 # Gets the cyclades and swithes values from DB
@@ -281,8 +319,8 @@ Rack=$(echo $Rack | sed 's/[^0-9]//g')
 Shelf=$(echo  "${Shelf##${Shelf%%?}}")
 
 
-log INFO "About to download env values from http://$APISERVER/SPOT/provisioning/api/sysprodracksmappings?Rack_Equals=$Rack&Shelf_Equals=$Shelf"
-URI="http://$APISERVER/SPOT/provisioning/api/sysprodracksmappings?Rack_Equals=$Rack&Shelf_Equals=$Shelf"
+log INFO "About to download env values from http://x.x.x.204/SPOT/provisioning/api/sysprodracksmappings?Rack_Equals=$Rack&Shelf_Equals=$Shelf"
+URI="http://x.x.x.204/SPOT/provisioning/api/sysprodracksmappings?Rack_Equals=$Rack&Shelf_Equals=$Shelf"
 results=$(
 perl - "$URI"  <<'_HERE_'
 use Time::Piece;
@@ -405,4 +443,5 @@ else
 
 checkRackBootp
 
+checkRackDhcp
 fi
