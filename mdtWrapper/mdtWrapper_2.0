@@ -734,8 +734,8 @@ productKey=""
 check=$(dmidecode | grep Dell ||  echo 'NOK')
 if [[  "$check" != *"NOK"* ]]; then
 
-productKey=$( cat /sys/firmware/acpi/tables/MSDM | awk '{print $5}' 2>/dev/null)
-
+#productKey=$( cat /sys/firmware/acpi/tables/MSDM | awk '{print $5}' 2>/dev/null)
+productKey=$(hexdump -s 56 -e '/29 "%s\n"' /sys/firmware/acpi/tables/MSDM 2>/dev/null)
 fi
 
 
