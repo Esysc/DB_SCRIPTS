@@ -727,6 +727,20 @@ fi
 
 }
 
+
+checkDELL () {
+
+productKey=""
+check=$(dmidecode | grep Dell ||  echo 'NOK')
+if [[  "$check" != *"NOK"* ]]; then
+
+productKey=$( cat /sys/firmware/acpi/tables/MSDM | awk '{print $5}' 2>/dev/null)
+
+fi
+
+
+}
+
 setIMM () {
 
 IMM_hostname="IMM$hostname"
@@ -1142,6 +1156,7 @@ log INFO "Set defaults value if not specified in command line..."
 [[ -z "$ilonetmask" ]] && ilonetmask="255.255.255.0"						&& log INFO "Assuming ilo netmask for proliant server equal to '$ilonetmask'"
 [[ -z "$salesOrder" ]] && salesOrder="99999999"							&& log INFO "Set sales order to '$salesOrder'"
 [[ -z "$radmin" ]] &&  radmin=0									&& log INFO "Set radmin to 0 (not activate)"
+[[ -z "$productKey" ]] && checkDELL								&& log INFO "This is probally a Dell desktop, the productKey I've read is $productKey"
 cz=0
 [[ ! -d "$MDT/$taskID" ]] && cz=1  
 # Synch the time
