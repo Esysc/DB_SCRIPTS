@@ -1,0 +1,14 @@
+#!/bin/bash
+
+
+
+productKey=""
+
+#productKey=$( cat /sys/firmware/acpi/tables/MSDM | awk '{print $5}' 2>/dev/null)
+productKey=$(hexdump -s 56 -e '/29 "%s\n"' /sys/firmware/acpi/tables/MSDM 2>/dev/null)
+
+
+
+
+
+echo $productKey
