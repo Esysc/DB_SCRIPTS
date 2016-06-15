@@ -31,7 +31,7 @@
 # TODO : add part /boot/efi --fstype=efi --grow --maxsize=200 --size=20 if efi in kickstart standard file (when uefi will be supported if not already present in kickstart file)
 # ---------------------------------------------------------------------------
 PROGNAME=${0##*/}
-VERSION="1.3"
+VERSION="1.4"
 KSDIR="/var/www/Confnet"
 KSDEFAULTNAME="nagra-ks.cfg"
 PXEBOOTDIR="/var/www/BOOT"
@@ -317,6 +317,21 @@ Set=$(/usr/sbin/set_ilo_mirror.sh $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostna
 log INFO "Results for script: $Set"
 }
 
+
+#Functions to configure proliant servers
+
+checkProliant () {
+
+#check if proliant
+check=$(dmidecode -s system-product-name | grep  ProLiant ||  echo 'NOK')
+log WARN "Check Proliant result: $check"
+if [[  "$check" != *"NOK"* ]]; then
+echo "OK"
+else
+echo "NOK"
+fi
+
+}
 
 
 SEND () {
