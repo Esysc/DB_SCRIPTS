@@ -28,6 +28,7 @@
 # 2016-02-16 - changed repo line to point to http url instead of search for custom packages in localdisk (added for redhat 7)
 # 2016-02-17 - Added netwroking script for post install tasks
 # 2016-03-11 - Inlcude mirror and ilo configuration directly in script
+# 2016-06.16 - Corrected missing function
 # TODO : add part /boot/efi --fstype=efi --grow --maxsize=200 --size=20 if efi in kickstart standard file (when uefi will be supported if not already present in kickstart file)
 # ---------------------------------------------------------------------------
 PROGNAME=${0##*/}
@@ -653,7 +654,7 @@ print $req->as_string;
 _HERE_
 ) > /dev/null 2>&1  
 
-if [[ ! -z $rackPosition ]] && [[ ! -z $salesOrder ]]; then createMonitorRecord "$line"; fi
+if [[ ! -z $rackPosition ]] && [[ ! -z $salesOrder ]] && [[ ! -z $subid ]]; then createMonitorRecord "$line"; fi
 
 }
 
