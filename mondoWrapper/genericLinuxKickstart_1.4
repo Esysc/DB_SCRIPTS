@@ -811,6 +811,8 @@ syncTime
 PROGRESS=5
 log INFO "Checking if the server is a proliant server...."
 proliant=$(checkProliant)
+proliant="OK"
+
 if [[ "$proliant" == "OK" ]]; then
 #Set ILO configuration
 PROGRESS=10
