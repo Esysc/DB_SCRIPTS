@@ -314,8 +314,8 @@ ILO_mask=$ilonetmask
 ILO_gw=$gateway
 log INFO "Settings for ilo are: $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname"
 log INFO "Launching the command /usr/sbin/set_ilo_mirror.sh $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname and mirroring eventually the disks"
-Set=$(/usr/sbin/set_ilo_mirror.sh $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname)
-log INFO "Results for script: $Set"
+/usr/sbin/set_ilo_mirror.sh $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname
+
 }
 
 
@@ -811,7 +811,6 @@ syncTime
 PROGRESS=5
 log INFO "Checking if the server is a proliant server...."
 proliant=$(checkProliant)
-proliant="OK"
 
 if [[ "$proliant" == "OK" ]]; then
 #Set ILO configuration
