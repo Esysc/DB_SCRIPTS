@@ -836,8 +836,8 @@ PROGRESS=50
 # Reboot to installed image
 log INFO "GOOD: ILO is configured and boot mode is now legacy mode (Proliant). Client now reboot to boot in install environment"
 #Clean remote comman table
-#perl /usr/local/bin/removeCommand.pl
-#/sbin/reboot
+perl /usr/local/bin/removeCommand.pl
+/sbin/reboot
 
 graceful_exit
 
