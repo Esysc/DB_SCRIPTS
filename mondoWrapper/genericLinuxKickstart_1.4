@@ -307,7 +307,7 @@ ILOReset () {
 setILOMIRROR () {
 # Settings for ILO and mirror of disks
 #mirroring is done if number of disk=2 and logical disk = 0
-ILO_hostname="ILO$hostname"
+ILO_hostname="$hostname-ilo"
 ILO_pwd="***REMOVED***"
 ILO_ip=$iloipaddress
 ILO_mask=$ilonetmask
@@ -315,7 +315,7 @@ ILO_gw=$gateway
 log INFO "Settings for ilo are: $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname"
 log INFO "Launching the command /usr/sbin/set_ilo_mirror.sh $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname and mirroring eventually the disks"
 /usr/sbin/set_ilo_mirror.sh $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname
-
+wait
 }
 
 
@@ -818,6 +818,8 @@ PROGRESS=10
 log INFO "Set the ILO configuration and create the logical volume ....."
 
 setILOMIRROR
+
+
 fi
 
 #the SSH execution is assured in the function
@@ -834,8 +836,8 @@ PROGRESS=50
 # Reboot to installed image
 log INFO "GOOD: ILO is configured and boot mode is now legacy mode (Proliant). Client now reboot to boot in install environment"
 #Clean remote comman table
-perl /usr/local/bin/removeCommand.pl
-/sbin/reboot
+#perl /usr/local/bin/removeCommand.pl
+#/sbin/reboot
 
 graceful_exit
 

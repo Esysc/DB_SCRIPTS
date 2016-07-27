@@ -424,8 +424,10 @@ ILO_mask=$ilonetmask
 ILO_gw=$gateway
 log INFO "Settings for ilo are: $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname"
 log INFO "Launching the command /usr/sbin/set_ilo_mirror.sh $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname and mirroring eventually the disks"
-Set=$(/usr/sbin/set_ilo_mirror.sh $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname)
+/usr/sbin/set_ilo_mirror.sh $ILO_ip $ILO_mask $ILO_gw $ILO_pwd $ILO_hostname
+wait
 log INFO "Results for script: $Set"
+
 }
 
 
@@ -895,6 +897,7 @@ PROGRESS=10
 log INFO "Set the ILO configuration and create the logical volume ....."
 
 setILOMIRROR
+
 fi
 
 #the SSH execution is assured in the function
