@@ -1,0 +1,10 @@
+#Dirty script to get hosts wwn address remotely
+# usage  hostname
+host=$1
+
+
+for i in host0 host1 
+do
+
+sshpass -p ***REMOVED***  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $host "cat  /sys/class/fc_host/$i/port_name"
+done
