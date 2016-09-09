@@ -264,9 +264,10 @@ _HERE_
             log WARN "Copyng iso files..."
             for iso in $ISOPATH
             do
-                log WARN "Copying $iso in $PUPPET:$ISOPATH"
-                scpExe $iso $ISOPATH
+                log WARN "Copying $iso in $PUPPET:$ISOROOT"
+                scpExe $iso $ISOROOT
             done
+	    sleep 10
         }
         
         mountPackager () {
