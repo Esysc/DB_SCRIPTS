@@ -262,7 +262,7 @@ _HERE_
         
         copyIsos() {
             log WARN "Copyng iso files..."
-            for iso in ISOPATH
+            for iso in $ISOPATH
             do
                 log WARN "Copying $iso in $PUPPET:$ISOPATH"
                 scpExe $iso $ISOPATH
