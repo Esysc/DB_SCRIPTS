@@ -17,20 +17,20 @@
 #@(#)------------------------------------------------------
 #@(#) Usage
 #@(#)   Basic usage :
-#@(#)     puppetInstall   -i [mlds01 ip address] -r [release name]
+#@(#)     puppetInstall   -i [mlds01 ip address] -g [gateway address for puppet (should be the ip address of mgt) -r [release name]
 #@(#)
 #@(#)  The release should be a solution relese or at least the MSPLAT (containing the isos and mlds core packages)
 #@(#)
 #@(#)------------------------------------------------------
 #@(#) Parameters
-#@(#)   -i	  : IP address of the candidate puppet server
+#@(#)   -i	  : IP address of the candidate puppet servera
+#@(#)   -g        : Gateway to assign to puppet (should be the ip address of mgt)
 #@(#)   -r        : solution release name to add to production environment
 #@(#)------------------------------------------------------
 
 typeset PROGNAME=${0##*/}
 typeset VERSION="1.1"
 typeset PACKAGER="/packager/delivery/Customers/"
-typeset HTTPSERVER="x.x.x.203"
 typeset FIND=$(which find)
 typeset OPTIONS="-mindepth 1 -maxdepth 2 -type d -name "
 typeset ROOTPWD="***REMOVED***"
@@ -155,7 +155,10 @@ _HERE_
                         PUPPET="$2" # You may want to check validity of $2
                         shift 2
                     ;;
-                    
+		    -g )
+                        GATEWAY="$2" # You may want to check validity of $2
+                        shift 2
+                    ;; 
                     -r )
                         RELEASE="$2" # You may want to check validity of $2
                         shift 2
@@ -172,7 +175,7 @@ _HERE_
                 esac
             done
             [ $# -ne 0 ] && Error 255
-            [[ -z $PUPPET || -z $RELEASE  ]] && Error 255
+            [[ -z $PUPPET || -z $RELEASE  || -z $GATEWAY ]] && Error 255
             if ! Validip $PUPPET  ; then
                 log ERROR "$PUPPET Not a valid IP" &&Error 255
             fi
@@ -188,7 +191,8 @@ _HERE_
             sshpass -p  $ROOTPWD ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null  -t root@$PUPPET " $@"
             if [[ $? -ne 0 ]]
             then
-                log ERROR "There was an error running the rpm command. I give up."
+                log ERROR "There was an error running the command. I give up."
+		log ERROR "$@"
                 exit 2
             fi
         }
@@ -200,7 +204,7 @@ _HERE_
                 log ERROR "Cannot contact the server $PUPPET, check the connection. Check also the correctness of the default route on $PUPPET"
                 exit 2
             fi
-            sshpass -p  $ROOTPWD scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null  -t "$1" root@$PUPPET:"$2"
+            sshpass -p  $ROOTPWD scp -r -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null   "$1" root@$PUPPET:"$2"
             if [[ $? -ne 0 ]]
             then
                 log ERROR "There was an error copying $iso . I give up."
@@ -250,12 +254,9 @@ _HERE_
             else
                 log INFO "RPMS CORE found! "
                 log WARN "Going to install them and prepare the environment"
-                for rpm in $RPMS
-                do
-                    log INFO "$rpm"
-                    sshExe " rpm -ihv http://$HTTPSERVER$rpm"
-                done
+                scpExe $MLDSCOREPATH "/tmp"
             fi
+	    sshExe " cd /tmp/$(basename $MLDSCOREPATH) && rpm -ihv --replacepkgs *.rpm"
             sshExe " $INSTALLCMD"
         }
         
@@ -274,7 +275,7 @@ _HERE_
             log INFO "Successfully installed $CIFSPKG "
             log WARN "Mounting packager...."
             sshExe " mkdir -p /packager"
-            sshExe "mount -t cifs //$HTTPSERVER/packager /packager -o pass=$ROOTPWD"
+            sshExe "mount -t cifs //$APISERVER/packager /packager -o pass=$ROOTPWD"
         }
         
         addRelease () {
@@ -282,7 +283,10 @@ _HERE_
             sshExe " addrelease -e production -r $RELPATH"
         }
         
-        
+       setDefaultGw () {
+	COMMAND=" ip route del 0/0 2>/dev/null; route add default gw $GATEWAY"
+	sshExe " $COMMAND"
+	} 
         
         
         # Verify script parameters
@@ -293,6 +297,7 @@ _HERE_
         findRelease
         findIsos
         findMldsCore
+        setDefaultGw
         installMldsCore
         copyIsos
         mountPackager
