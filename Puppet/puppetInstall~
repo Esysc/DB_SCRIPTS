@@ -66,51 +66,18 @@ log() {
         echo "$line"
     fi >&2
     
-        line=${line//\"/\\\"}
+    line=${line//\"/\\\"}
         line=${line//\\/\\\\}
         line=${line//>/}
         line=${line//</}
         if [[ "$ID" != "" ]]; then
-                line=${line//\"/\\\"}
+            line=${line//\"/\\\"}
                 line=${line//\\/\\\\}
                 line=${line//>/}
                 line=${line//</}
                 REST='{"returnstdout" : "|'"$hostNAME"'| '"$line"'"}'
                 URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
                 METHOD="POST"
-(
-perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
-use integer;
-use POSIX qw(strftime);
-use Backticks;
-use Data::Dumper;
-use Sys::Hostname;
-use Socket;
-use LWP::UserAgent;
-use LWP::Simple;
-use strict;
-use warnings;
-use integer;
-use Switch;
-use JSON ;
-use feature qw(switch);
-use HTTP::Cookies;
-use HTTP::Request;
-use LWP;
-use File::Path qw{mkpath};
-my $uri = shift;
-my $REST = shift;
-my $METHOD = shift;
-my $lwp = LWP::UserAgent->new(
-                        timeout               => 10,
-);
-my $req = HTTP::Request->new( "$METHOD", "$uri" );
-$req->content($REST);
-my $resp = $lwp->request($req);
-print $req->as_string;
-#print Dumper $resp;
-_HERE_
-)  >/dev/null 2>&1
                 
                 
             fi
@@ -300,7 +267,6 @@ _HERE_
         
         log INFO "End of script execution"
         exit 0
-        
         
         
         
