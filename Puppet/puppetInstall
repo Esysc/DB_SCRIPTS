@@ -273,7 +273,8 @@ _HERE_
             log WARN "Copying $iso in $PUPPET:$ISOROOT"
             scpExe $iso $ISOROOT
         done
-        sleep 10
+	log WARN "Sleeping 1 minutes for isomounter..."
+        sleep 70
     }
     
     mountPackager () {
