@@ -7,7 +7,6 @@
 #usage          :./puppetInstall
 #notes          :
 #============================================================================
-
 #@(#)------------------------------------------------------
 #@(#) General Information
 #@(#)   Name      : puppetInstall
@@ -38,7 +37,12 @@ typeset ISOROOT="/data/docroot/iso_files/"
 typeset CIFSPKG="cifs-utils"
 typeset INSTALLCMD="/usr/share/nagra-foreman-installer/install.sh"
 typeset APISERVER="spmgt.my.comp.ltd"
+typeset hostNAME=$(hostname)
+typeset MESSAGE="<div class='alert alert-info blinking'>Executing Puppet installation ..... Be patience</div>"
 
+
+
+APISERVER=$(dig +short ${APISERVER})
 ## Parse prog name to find an ID if executed from SPOTDB
 
 ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
@@ -65,20 +69,24 @@ log() {
     else
         echo "$line"
     fi >&2
-    
+    if [[ "$ID" != "" ]]; then
         line=${line//\"/\\\"}
-        line=${line//\\/\\\\}
-        line=${line//>/}
-        line=${line//</}
-        if [[ "$ID" != "" ]]; then
-                line=${line//\"/\\\"}
-                line=${line//\\/\\\\}
-                line=${line//>/}
-                line=${line//</}
-                REST='{"returnstdout" : "|'"$hostNAME"'| '"$line"'"}'
-                URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
-                METHOD="POST"
-(
+            line=${line//\\/\\\\}
+            line=${line//>/}
+            line=${line//</}
+            REST='{"returnstdout" : "|'"$hostNAME"'| '"$line"'"}'
+            URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
+            METHOD="POST"
+	    SEND     
+	    REST="{\"salesorder\":\"$ID\",\"data\":\"$PROGNAME\",\"status\":\"$hostNAME\",\"message\":\"$MESSAGE\",\"dwprocessed\":1,\"creator\":1}"
+            URI="http://$APISERVER/SPOT/provisioning/api/tempdata/$ID"
+            METHOD="PUT"
+	    SEND        
+        fi
+    }
+    SEND () {
+        
+        (
 perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
 use integer;
 use POSIX qw(strftime);
@@ -110,203 +118,203 @@ my $resp = $lwp->request($req);
 print $req->as_string;
 #print Dumper $resp;
 _HERE_
-)  >/dev/null 2>&1
-                
-                
-            fi
-            
-        }
+        )   >/dev/null 2>&1
         
-        CheckParam() {
-            Validip() {
-                ERROR=0
-                oldIFS=$IFS
-                IFS=.
-                set -f
-                set -- $1
-                if [ $# -eq 4 ]
-                then
-                    for seg
-                    do
-                        case $seg in
-                            ""|*[!0-9]*) ERROR=1;break ;; ## Segment empty or non-numeric char
-                            *) [ $seg -gt 255 ] && ERROR=1 ;;
-                        esac
-                    done
-                else
-                    ERROR=1 ## Not 4 segments
-                fi
-                IFS=$oldIFS
-                set +f
-                return $ERROR
-            }
-            
-            Help() {
-                log WARN "$(echo $1:; grep "^#@(#)" $1 | sed "s/#@(#)/  /g")"
-            }
-            
-            Error() {
-                Help $0; exit $1
-            }
-            [ $# -eq 0 ] && Error 255
-            while [ $# -gt 0 ] ; do
-                case "$1" in
-                    -i )
-                        PUPPET="$2" # You may want to check validity of $2
-                        shift 2
-                    ;;
-		    -g )
-                        GATEWAY="$2" # You may want to check validity of $2
-                        shift 2
-                    ;; 
-                    -r )
-                        RELEASE="$2" # You may want to check validity of $2
-                        shift 2
-                    ;;
-                    -x )
-                        set -x
-                        shift 1
-                    ;;
-                    -H )
-                        Error 0
-                        shift 1
-                    ;;
-                    *) Error 255 ;;
-                esac
-            done
-            [ $# -ne 0 ] && Error 255
-            [[ -z $PUPPET || -z $RELEASE  || -z $GATEWAY ]] && Error 255
-            if ! Validip $PUPPET  ; then
-                log ERROR "$PUPPET Not a valid IP" &&Error 255
-            fi
-        }
         
-        sshExe() {
-            # "$@" command or function
-            test=$(nmap $PUPPET -PN -p ssh | grep open)
-            if [[ "$test" == "" ]]; then
-                log ERROR "Cannot contact the server $PUPPET, check the connection. Check also the correctness of the default route on $PUPPET"
-                exit 2
-            fi
-            sshpass -p  $ROOTPWD ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null  -t root@$PUPPET " $@"
-            if [[ $? -ne 0 ]]
+        
+    }
+    CheckParam() {
+        Validip() {
+            ERROR=0
+            oldIFS=$IFS
+            IFS=.
+            set -f
+            set -- $1
+            if [ $# -eq 4 ]
             then
-                log ERROR "There was an error running the command. I give up."
-		log ERROR "$@"
-                exit 2
-            fi
-        }
-        
-        scpExe() {
-            # $1 source $2 destination
-            test=$(nmap $PUPPET -PN -p ssh | grep open)
-            if [[ "$test" == "" ]]; then
-                log ERROR "Cannot contact the server $PUPPET, check the connection. Check also the correctness of the default route on $PUPPET"
-                exit 2
-            fi
-            sshpass -p  $ROOTPWD scp -r -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null   "$1" root@$PUPPET:"$2"
-            if [[ $? -ne 0 ]]
-            then
-                log ERROR "There was an error copying $iso . I give up."
-                exit 299
-            fi
-        }
-        
-        
-        findRelease () {
-            log WARN "trying to find release $RELESE"
-            RES=$($FIND $PACKAGER $OPTIONS $RELEASE)
-            if [[ "$RES" == "" ]]; then
-                log ERROR "Release not found..." && exit 2
+                for seg
+                do
+                    case $seg in
+                        ""|*[!0-9]*) ERROR=1;break ;; ## Segment empty or non-numeric char
+                        *) [ $seg -gt 255 ] && ERROR=1 ;;
+                    esac
+                done
             else
-                log INFO "Release $RES found!"
+                ERROR=1 ## Not 4 segments
             fi
-            RELPATH=$RES
+            IFS=$oldIFS
+            set +f
+            return $ERROR
         }
         
-        findIsos () {
-            log WARN "trying to find iso files....  "
-            RES=$($FIND $RELPATH | grep  .iso)
-            if [[ "$RES" == "" ]]; then
-                log ERROR "No iso files to upload on server...." && exit 2
-            else
-                log INFO "Iso files found : $RES"
-            fi
-            ISOPATH=$RES
+        Help() {
+            log WARN "$(echo $1:; grep "^#@(#)" $1 | sed "s/#@(#)/  /g")"
         }
         
-        findMldsCore () {
-            log WARN "trying to find mlds core module "
-            RES=$($FIND $RELPATH -name 'MLDS_*' -print -quit)
-            if [[ "$RES" == "" ]]; then
-                log ERROR "MLDS module  not found" && exit 2
-            else
-                log INFO "MLDS CORE found: $RES"
-            fi
-            MLDSCOREPATH=$RES
+        Error() {
+            Help $0; exit $1
         }
-        
-        installMldsCore () {
-            log WARN "Going to install puppet and foreman.... "
-            RPMS=$($FIND $MLDSCOREPATH -name '*.rpm')
-            if [[ "$RPMS" == "" ]]; then
-                log ERROR "RPMS  not found" && exit 2
-            else
-                log INFO "RPMS CORE found! "
-                log WARN "Going to install them and prepare the environment"
-                scpExe $MLDSCOREPATH "/tmp"
-            fi
-	    sshExe " cd /tmp/$(basename $MLDSCOREPATH) && rpm -ihv --replacepkgs *.rpm"
-            sshExe " $INSTALLCMD"
-        }
-        
-        copyIsos() {
-            log WARN "Copyng iso files..."
-            for iso in $ISOPATH
-            do
-                log WARN "Copying $iso in $PUPPET:$ISOROOT"
-                scpExe $iso $ISOROOT
-            done
-	    sleep 10
-        }
-        
-        mountPackager () {
-            log WARN "Installing  $CIFSPKG on $PUPPET ...."
-            sshExe " rpm -ihv $CIFSPKG"
-            log INFO "Successfully installed $CIFSPKG "
-            log WARN "Mounting packager...."
-            sshExe " mkdir -p /packager"
-            sshExe "mount -t cifs //$APISERVER/packager /packager -o pass=$ROOTPWD"
-        }
-        
-        addRelease () {
-            log WARN "Adding release $RELEASE to production environment"
-            sshExe " addrelease -e production -r $RELPATH"
-        }
-        
-       setDefaultGw () {
-	COMMAND=" ip route del 0/0 2>/dev/null; route add default gw $GATEWAY"
-	sshExe " $COMMAND"
-	} 
-        
-        
-        # Verify script parameters
-        CheckParam "$@"
-        
-        # the following steps are self explanatory....
-        
-        findRelease
-        findIsos
-        findMldsCore
-        setDefaultGw
-        installMldsCore
-        copyIsos
-        mountPackager
-        addRelease
-        
-        log INFO "End of script execution"
-        exit 0
-        
-        
-        
-        
+        [ $# -eq 0 ] && Error 255
+        while [ $# -gt 0 ] ; do
+            case "$1" in
+                -i )
+                    PUPPET="$2" # You may want to check validity of $2
+                    shift 2
+                ;;
+                -g )
+                    GATEWAY="$2" # You may want to check validity of $2
+                    shift 2
+                ;;
+                -r )
+                    RELEASE="$2" # You may want to check validity of $2
+                    shift 2
+                ;;
+                -x )
+                    set -x
+                    shift 1
+                ;;
+                -H )
+                    Error 0
+                    shift 1
+                ;;
+                *) Error 255 ;;
+            esac
+        done
+        [ $# -ne 0 ] && Error 255
+        [[ -z $PUPPET || -z $RELEASE  || -z $GATEWAY ]] && Error 255
+        if ! Validip $PUPPET  ; then
+             MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "$PUPPET Not a valid IP" &&Error 255
+        fi
+    }
+    
+    sshExe() {
+        # "$@" command or function
+        test=$(nmap $PUPPET -PN -p ssh | grep open)
+        if [[ "$test" == "" ]]; then
+             MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "Cannot contact the server $PUPPET, check the connection. Check also the correctness of the default route on $PUPPET"
+             exit 2
+        fi
+        sshpass -p  $ROOTPWD ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null  -t root@$PUPPET " $@"
+        if [[ $? -ne 0 ]]
+        then
+            log ERROR "There was an error running the command. I give up."
+             MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "$@"
+             exit 2
+        fi
+    }
+    
+    scpExe() {
+        # $1 source $2 destination
+        test=$(nmap $PUPPET -PN -p ssh | grep open)
+        if [[ "$test" == "" ]]; then
+            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "Cannot contact the server $PUPPET, check the connection. Check also the correctness of the default route on $PUPPET"
+            exit 2
+        fi
+        sshpass -p  $ROOTPWD scp -r -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null   "$1" root@$PUPPET:"$2"
+        if [[ $? -ne 0 ]]
+        then
+            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "There was an error copying $iso . I give up."
+            exit 299
+        fi
+    }
+    
+    
+    findRelease () {
+        log WARN "trying to find release $RELESE"
+        RES=$($FIND $PACKAGER $OPTIONS $RELEASE)
+        if [[ "$RES" == "" ]]; then
+            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "Release not found..." && exit 2
+        else
+            log INFO "Release $RES found!"
+        fi
+        RELPATH=$RES
+    }
+    
+    findIsos () {
+        log WARN "trying to find iso files....  "
+        RES=$($FIND $RELPATH | grep  .iso)
+        if [[ "$RES" == "" ]]; then
+            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "No iso files to upload on server...." && exit 2
+        else
+            log INFO "Iso files found : $RES"
+        fi
+        ISOPATH=$RES
+    }
+    
+    findMldsCore () {
+        log WARN "trying to find mlds core module "
+        RES=$($FIND $RELPATH -name 'MLDS_*' -print -quit)
+        if [[ "$RES" == "" ]]; then
+            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "MLDS module  not found" && exit 2
+        else
+            log INFO "MLDS CORE found: $RES"
+        fi
+        MLDSCOREPATH=$RES
+    }
+    
+    installMldsCore () {
+        log WARN "Going to install puppet and foreman.... "
+        RPMS=$($FIND $MLDSCOREPATH -name '*.rpm')
+        if [[ "$RPMS" == "" ]]; then
+            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "RPMS  not found" && exit 2
+        else
+            log INFO "RPMS CORE found! "
+            log WARN "Going to install them and prepare the environment"
+            scpExe $MLDSCOREPATH "/tmp"
+        fi
+        sshExe " cd /tmp/$(basename $MLDSCOREPATH) && rpm -ihv --replacepkgs *.rpm"
+        sshExe " $INSTALLCMD"
+    }
+    
+    copyIsos() {
+        log WARN "Copyng iso files..."
+        for iso in $ISOPATH
+        do
+            log WARN "Copying $iso in $PUPPET:$ISOROOT"
+            scpExe $iso $ISOROOT
+        done
+        sleep 10
+    }
+    
+    mountPackager () {
+        log WARN "Installing  $CIFSPKG on $PUPPET ...."
+        sshExe " yum update; yum install  -y  $CIFSPKG"
+        log INFO "Successfully installed $CIFSPKG "
+        log WARN "Mounting packager...."
+        sshExe " mkdir -p /packager"
+        sshExe "mount -t cifs //$APISERVER/packager /packager -o pass=$ROOTPWD"
+    }
+    
+    addRelease () {
+        log WARN "Adding release $RELEASE to production environment"
+        sshExe " addrelease -e production -r $RELPATH"
+    }
+    
+    setDefaultGw () {
+        COMMAND=" ip route del 0/0 2>/dev/null; route add default gw $GATEWAY"
+        sshExe " $COMMAND"
+    }
+    
+    
+    # Verify script parameters
+    CheckParam "$@"
+    
+    # the following steps are self explanatory....
+    
+    findRelease
+    findIsos
+    findMldsCore
+    setDefaultGw
+    installMldsCore
+    copyIsos
+    mountPackager
+    addRelease
+    
+   MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" &&  log INFO "End of script execution"
+    exit 0
+    
+    
+    
+    
+    
+    
