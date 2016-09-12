@@ -184,7 +184,8 @@ _HERE_
         if ! Validip $PUPPET  ; then
              MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "$PUPPET Not a valid IP" &&Error 255
         fi
-        hostNAME=$(sshExe hostname)
+        hostNAME=$(sshExe hostname )
+        hostNAME=$(echo $hostNAME |tr '\n' '')
     }
     
     sshExe() {
