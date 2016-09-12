@@ -37,7 +37,6 @@ typeset ISOROOT="/data/docroot/iso_files/"
 typeset CIFSPKG="cifs-utils"
 typeset INSTALLCMD="/usr/share/nagra-foreman-installer/install.sh"
 typeset APISERVER="spmgt.my.comp.ltd"
-typeset hostNAME=$(hostname)
 typeset MESSAGE="<div class='alert alert-info blinking'>Executing Puppet installation ..... Be patience</div>"
 
 
@@ -185,6 +184,7 @@ _HERE_
         if ! Validip $PUPPET  ; then
              MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "$PUPPET Not a valid IP" &&Error 255
         fi
+        hostNAME=$(sshExe hostname)
     }
     
     sshExe() {
