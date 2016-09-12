@@ -37,7 +37,7 @@ typeset ISOROOT="/data/docroot/iso_files/"
 typeset CIFSPKG="cifs-utils"
 typeset INSTALLCMD="/usr/share/nagra-foreman-installer/install.sh"
 typeset APISERVER="spmgt.my.comp.ltd"
-typeset MESSAGE="<div class='alert alert-info blinking'>Executing Puppet installation ..... Be patience</div>"
+typeset MESSAGE="<div class='alert alert-danger blinking'>Executing Puppet installation ..... Be patience</div>"
 
 
 
@@ -182,7 +182,7 @@ _HERE_
         [ $# -ne 0 ] && Error 255
         [[ -z $PUPPET || -z $RELEASE  || -z $GATEWAY ]] && Error 255
         if ! Validip $PUPPET  ; then
-             MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "$PUPPET Not a valid IP" &&Error 255
+             MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "$PUPPET Not a valid IP" &&Error 255
         fi
         hostNAME=$(sshExe hostname)
     }
@@ -191,14 +191,14 @@ _HERE_
         # "$@" command or function
         test=$(nmap $PUPPET -PN -p ssh | grep open)
         if [[ "$test" == "" ]]; then
-             MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "Cannot contact the server $PUPPET, check the connection. Check also the correctness of the default route on $PUPPET"
+             MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "Cannot contact the server $PUPPET, check the connection. Check also the correctness of the default route on $PUPPET"
              exit 2
         fi
         sshpass -p  $ROOTPWD ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null  -t root@$PUPPET " $@"
         if [[ $? -ne 0 ]]
         then
             log ERROR "There was an error running the command. I give up."
-             MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "$@"
+             MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "$@"
              exit 2
         fi
     }
@@ -207,13 +207,13 @@ _HERE_
         # $1 source $2 destination
         test=$(nmap $PUPPET -PN -p ssh | grep open)
         if [[ "$test" == "" ]]; then
-            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "Cannot contact the server $PUPPET, check the connection. Check also the correctness of the default route on $PUPPET"
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "Cannot contact the server $PUPPET, check the connection. Check also the correctness of the default route on $PUPPET"
             exit 2
         fi
         sshpass -p  $ROOTPWD scp -r -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null   "$1" root@$PUPPET:"$2"
         if [[ $? -ne 0 ]]
         then
-            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "There was an error copying $iso . I give up."
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "There was an error copying $iso . I give up."
             exit 299
         fi
     }
@@ -223,7 +223,7 @@ _HERE_
         log WARN "trying to find release $RELESE"
         RES=$($FIND $PACKAGER $OPTIONS $RELEASE)
         if [[ "$RES" == "" ]]; then
-            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "Release not found..." && exit 2
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "Release not found..." && exit 2
         else
             log INFO "Release $RES found!"
         fi
@@ -234,7 +234,7 @@ _HERE_
         log WARN "trying to find iso files....  "
         RES=$($FIND $RELPATH | grep  .iso)
         if [[ "$RES" == "" ]]; then
-            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "No iso files to upload on server...." && exit 2
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "No iso files to upload on server...." && exit 2
         else
             log INFO "Iso files found : $RES"
         fi
@@ -245,7 +245,7 @@ _HERE_
         log WARN "trying to find mlds core module "
         RES=$($FIND $RELPATH -name 'MLDS_*' -print -quit)
         if [[ "$RES" == "" ]]; then
-            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "MLDS module  not found" && exit 2
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "MLDS module  not found" && exit 2
         else
             log INFO "MLDS CORE found: $RES"
         fi
@@ -256,7 +256,7 @@ _HERE_
         log WARN "Going to install puppet and foreman.... "
         RPMS=$($FIND $MLDSCOREPATH -name '*.rpm')
         if [[ "$RPMS" == "" ]]; then
-            MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" && log ERROR "RPMS  not found" && exit 2
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "RPMS  not found" && exit 2
         else
             log INFO "RPMS CORE found! "
             log WARN "Going to install them and prepare the environment"
@@ -311,7 +311,7 @@ _HERE_
     mountPackager
     addRelease
     
-   MESSAGE="<div class='alert alert-info'>$PROGNAME terminated</div>" &&  log INFO "End of script execution"
+   MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&  log INFO "End of script execution"
     exit 0
     
     
