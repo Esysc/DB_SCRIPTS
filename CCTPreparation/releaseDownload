@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+#title          :releaseDownload
+#description    :prepare a full puppet server deployment
+#author         :ACS
+#date           :20160909
+#version        :1.1
+#usage          :./releaseDownload
+#notes          :
+#============================================================================
+#@(#)------------------------------------------------------
+#@(#) General Information
+#@(#)   Name      : releaseDownload
+#@(#)   Purpose   : Aim to completely install a dedicated puppet server
+#@(#)   Version  ( : 1.1
+#@(#)   Author    : A. Cristalli
+#@(#)------------------------------------------------------
+#@(#) Usage
+#@(#)   Basic usage :
+#@(#)     releaseDownload   -i [mgt worstation ip address]  -r [release path]
+#@(#)
+#@(#)
+#@(#)------------------------------------------------------
+#@(#) Parameters
+#@(#)   -i	  : IP address of the mgt workstation
+#@(#)   -r        : solution release name to download
+#@(#)------------------------------------------------------
+
+typeset PROGNAME=${0##*/}
+typeset VERSION="1.1"
+typeset SAMBAOPT=" -o user=Administrator -o pass=***REMOVED***"
+typeset MOUNTPNT="/mnt/$(LC_CTYPE=C tr -cd 'a-zA-Z' < /dev/urandom | head -c 10)"
+typeset SAMBACMD="mount -t cifs "
+typeset DELIVERY="/Mycompany/delivery"
+typeset APISERVER="spmgt.my.comp.ltd"
+
+## Parse prog name to find an ID if executed from SPOTDB
+
+ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
+
+
+#Log function
+   SEND () {
+
+        (
+perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $uri = shift;
+my $REST = shift;
+my $METHOD = shift;
+my $lwp = LWP::UserAgent->new(
+timeout               => 10,
+);
+my $req = HTTP::Request->new( "$METHOD", "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+_HERE_
+        )   >/dev/null 2>&1
+
+
+
+    }
+
+
+log() {
+    local level=${1?}
+    shift
+    local code=0
+    local line="[$(date '+%F %T')] $level: $*"
+    if [ -t 2 ]
+    then
+        case "$level" in
+            INFO) code=36 ;;
+            DEBUG) code=30 ;;
+            WARN) code=33 ;;
+            ERROR) code=31 ;;
+            *) code=37 ;;
+        esac
+        echo -e "\e[${code}m${line}\e[0m"
+    else
+        echo "$line"
+    fi >&2
+    if [[ "$ID" != "" ]]; then
+        line=${line//\"/\\\"}
+            line=${line//\\/\\\\}
+            line=${line//>/}
+            line=${line//</}
+            REST='{"returnstdout" : "'"$hostNAME"': '"$line"'"}'
+            URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
+            METHOD="POST"
+            SEND
+        fi
+    }
+    CheckParam() {
+        Validip() {
+            ERROR=0
+            oldIFS=$IFS
+            IFS=.
+            set -f
+            set -- $1
+            if [ $# -eq 4 ]
+            then
+                for seg
+                do
+                    case $seg in
+                        ""|*[!0-9]*) ERROR=1;break ;; ## Segment empty or non-numeric char
+                        *) [ $seg -gt 255 ] && ERROR=1 ;;
+                    esac
+                done
+            else
+                ERROR=1 ## Not 4 segments
+            fi
+            IFS=$oldIFS
+            set +f
+            return $ERROR
+        }
+        
+        Help() {
+            log WARN "$(echo $1:; grep "^#@(#)" $1 | sed "s/#@(#)/  /g")"
+        }
+        
+        Error() {
+            Help $0; exit $1
+        }
+        [ $# -eq 0 ] && Error 255
+        while [ $# -gt 0 ] ; do
+            case "$1" in
+                -i )
+                    MGT="$2" # You may want to check validity of $2
+                    shift 2
+                ;;
+                -r )
+                    RELEASE="$2" # You may want to check validity of $2
+                    shift 2
+                ;;
+                -x )
+                    set -x
+                    shift 1
+                ;;
+                -H )
+                    Error 0
+                    shift 1
+                ;;
+                *) Error 255 ;;
+            esac
+        done
+        [ $# -ne 0 ] && Error 255
+        [[ -z $MGT || -z $RELEASE ]] && Error 255
+        if ! Validip $MGT  ; then
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "$MGT Not a valid IP" &&Error 255
+        fi
+        hostNAME=$MGT
+    }
+    
+    validateRelease () {
+        ls $RELEASE 2>/dev/null
+        if [ $? -ne 0 ]; then
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&   log ERROR "The release $RELESE doesn't exist!" && exit 2
+        fi
+    }
+    mountMGT () {
+        log WARN "trying to mount //$MGT/c$i on $MOUNTPNT"
+        mkdir -p  $MOUNTPNT
+        $SAMBACMD //$MGT/c$ $MOUNTPNT $SAMBAOPT 2>/dev/null
+        if [ $? -ne 0 ]; then
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&  rm -rf $MOUNTPNT && log ERROR "Cannot mount the remote samba directory..." && exit 2
+        fi
+    }
+    
+    copyRelease () {
+        log WARN "Copying $RELEASE in //$MGT/$DELIVERY"
+        scp -r  $RELEASE $MOUNTPNT/$DELIVERY 2>/dev/null
+        if [ $? -ne 0 ]; then
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && rm -rf $MOUNTPNT && log ERROR "Cannot copy the release..." && exit 2
+        fi
+        umount -rf $MOUNTPNT
+        rm -rf $MOUNTPNT
+        
+    }
+    
+    # Verify script parameters
+    CheckParam "$@"
+    
+    # the following steps are self explanatory....
+    validateRelease
+    mountMGT
+    copyRelease
+    
+    MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&  log INFO "End of script execution"
+    rm -rf $MOUNTPNT
+    exit 0
+    
+    
+    
+    
+    
+    
+    
+    
+    

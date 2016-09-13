@@ -1,4 +1,4 @@
 echo "from bash"
 perl -e '
-print "from perl";
-'
+print "from perl\n"
+';
