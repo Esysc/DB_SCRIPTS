@@ -177,9 +177,9 @@ log() {
         fi
     }
     mountMGT () {
-        log WARN "trying to mount //$MGT/c$i on $MOUNTPNT"
+        log WARN "trying to mount //$MGT/c$ on $MOUNTPNT"
         mkdir -p  $MOUNTPNT
-        $SAMBACMD //$MGT/c$ $MOUNTPNT $SAMBAOPT 2>/dev/null
+        $SAMBACMD //$MGT/'c$' $MOUNTPNT $SAMBAOPT 2>/dev/null
         if [ $? -ne 0 ]; then
             MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&  rm -rf $MOUNTPNT && log ERROR "Cannot mount the remote samba directory..." && exit 2
         fi
