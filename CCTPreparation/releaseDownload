@@ -32,7 +32,7 @@ typeset MOUNTPNT="/mnt/$(LC_CTYPE=C tr -cd 'a-zA-Z' < /dev/urandom | head -c 10)
 typeset SAMBACMD="mount -t cifs "
 typeset DELIVERY="/Mycompany/delivery"
 typeset APISERVER="spmgt.my.comp.ltd"
-
+typeset SHARENAME="c$" 
 ## Parse prog name to find an ID if executed from SPOTDB
 
 ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
@@ -177,9 +177,9 @@ log() {
         fi
     }
     mountMGT () {
-        log WARN "trying to mount //$MGT/c$ on $MOUNTPNT"
+        log WARN "trying to mount //$MGT/$SHARENAME on $MOUNTPNT"
         mkdir -p  $MOUNTPNT
-        $SAMBACMD //$MGT/c\$ $MOUNTPNT $SAMBAOPT 2>/dev/null
+        $SAMBACMD //$MGT/$SHARENAME $MOUNTPNT $SAMBAOPT 2>/dev/null
         if [ $? -ne 0 ]; then
             MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&  rm -rf $MOUNTPNT && log ERROR "Cannot mount the remote samba directory..." && exit 2
         fi
