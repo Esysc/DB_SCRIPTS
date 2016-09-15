@@ -27,12 +27,11 @@
 
 typeset PROGNAME=${0##*/}
 typeset VERSION="1.1"
-typeset SAMBAOPT=" -o user=Administrator -o pass=***REMOVED***"
-typeset MOUNTPNT="/mnt/$(LC_CTYPE=C tr -cd 'a-zA-Z' < /dev/urandom | head -c 10)"
-typeset SAMBACMD="mount -t cifs "
-typeset DELIVERY="/Mycompany/delivery"
+typeset SAMBACMD="$(which smbclient ) "
 typeset APISERVER="spmgt.my.comp.ltd"
-typeset SHARENAME="c$" 
+typeset SHARENAME='c$' 
+typeset MESSAGE="<div class='alert alert-danger blinking'>Executing $PROGNAME ..... Be patience</div>"
+
 ## Parse prog name to find an ID if executed from SPOTDB
 
 ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
@@ -105,7 +104,15 @@ log() {
             line=${line//</}
             REST='{"returnstdout" : "'"$hostNAME"': '"$line"'"}'
             URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
-            METHOD="POST"
+            if [[ "$level" == "COPY" ]]; then
+		METHOD="GET"
+            else
+            	METHOD="POST"
+	    fi
+            SEND
+            REST="{\"salesorder\":\"$ID\",\"data\":\"$PROGNAME\",\"status\":\"$hostNAME\",\"message\":\"$MESSAGE\",\"dwprocessed\":1,\"creator\":1}"
+            URI="http://$APISERVER/SPOT/provisioning/api/tempdata/$ID"
+            METHOD="PUT"
             SEND
         fi
     }
@@ -176,43 +183,39 @@ log() {
             MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&   log ERROR "The release $RELESE doesn't exist!" && exit 2
         fi
     }
-    mountMGT () {
-        log WARN "trying to mount //$MGT/$SHARENAME on $MOUNTPNT"
-        mkdir -p  $MOUNTPNT
-        $SAMBACMD //$MGT/$SHARENAME $MOUNTPNT $SAMBAOPT 2>/dev/null
+     logCommand () {
+	while IFS= read -r line
+  	do
+    	    log COPY  "$line"
+  	done
+
+    } 
+     copyRelease () {
+        PACKAGERPATH=$(dirname ${RELEASE})
+        RELEASENAME=$(basename ${RELEASE})
+        cd $PACKAGERPATH
+        echo "release path $PACKAGERPATH"
+        echo "release name $RELEASENAME"
+        smbclient \\\\$MGT\\$SHARENAME -U Administrator%***REMOVED***  << SMBCLIENTCOMMANDS 2>&1 | logCommand
+	lcd $PACKAGERPATH
+	cd Mycompany
+	cd delivery
+	recurse
+	prompt
+	mput $RELEASENAME
+	exit
+SMBCLIENTCOMMANDS
+
         if [ $? -ne 0 ]; then
-            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&  rm -rf $MOUNTPNT && log ERROR "Cannot mount the remote samba directory..." && exit 2
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>"  && echo "Cannot copy the release..." && exit 2
         fi
     }
-    
-    copyRelease () {
-        log WARN "Copying $RELEASE in //$MGT/$DELIVERY"
-        scp -r  $RELEASE $MOUNTPNT/$DELIVERY 2>/dev/null
-        if [ $? -ne 0 ]; then
-            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && rm -rf $MOUNTPNT && log ERROR "Cannot copy the release..." && exit 2
-        fi
-        umount -rf $MOUNTPNT
-        rm -rf $MOUNTPNT
-        
-    }
-    
+ 
     # Verify script parameters
     CheckParam "$@"
-    
-    # the following steps are self explanatory....
-    validateRelease
-    mountMGT
-    copyRelease
-    
-    MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&  log INFO "End of script execution"
-    rm -rf $MOUNTPNT
-    exit 0
-    
-    
-    
-    
-    
-    
-    
-    
-    
+        # the following steps are self explanatory....
+        validateRelease
+	 log WARN "Copying $RELEASE in //$MGT/$DELIVERY .... May takes some time."
+        copyRelease 
+       MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&  log INFO "End of script execution"
+      exit 0

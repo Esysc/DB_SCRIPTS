@@ -13,7 +13,7 @@
 
 PROGNAME=${0##*/}
 VERSION="0.1"
-
+typeset MESSAGE="<div class='alert alert-danger blinking'>Executing $PROGNAME ..... Be patience</div>"
 ## Parse prog name to find an ID if executed from SPOTDB
 
 ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
@@ -49,12 +49,21 @@ log() {
     REST='{"title":"'"$PROGNAME"'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
     URI="http://$APISERVER/SPOT/provisioning/api/events"
     METHOD="POST"
+    SEND
   else
     REST='{"returnstdout" : "|'"$hostNAME"'| '"$line"'"}'
     URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
     METHOD="POST"
+    SEND
+    REST="{\"salesorder\":\"$ID\",\"data\":\"$PROGNAME\",\"status\":\"$hostNAME\",\"message\":\"$MESSAGE\",\"dwprocessed\":1,\"creator\":1}"
+    URI="http://$APISERVER/SPOT/provisioning/api/tempdata/$ID"
+    METHOD="PUT"
+    SEND
   fi
 
+}
+
+SEND () {
   (
 perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
 use integer;
@@ -103,6 +112,7 @@ scpExe () {
   log INFO "$(sshpass -p $password scp -p  -r -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $2 root@$1:$3)"
   if [[ $? -ne 0 ]]
   then
+     MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>"
     log ERROR "Cannot scp $2 file to client, every further action will be not possible so I exit right now!"
     error_exit
   fi
@@ -118,6 +128,7 @@ sshExe() {
   log INFO "$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -tt root@$1 " $2 ")" 
   if [[ $? -ne 0 ]]
   then
+     MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>"
     log ERROR "Execution Error! May be ssh connection problem or execution of command'$2' issue. I will exit now."
     error_exit
   fi
@@ -148,6 +159,7 @@ copyModules () {
     scpExe $host $module $baseDir
     
   else
+     MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>"
     log ERROR "Cannot find $module!!!"
     log ERROR "Check if packager is mounted locally"
     error_exit
@@ -317,6 +329,7 @@ test_args
  #Test if the remote host can be reached
   check=$(nmap -PN -p ssh $host | grep 'open')
   if [[ $check ==  "" ]]; then
+     MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>"
     log ERROR "Cannot connect to $host, ssh port not open or host not reachable. Please, check  ip address, routing, or ssh service available on remote host. "
     error_exit
   fi
@@ -330,6 +343,7 @@ copyModules
 if [ $provision -eq 1 ]; then
   remoteInstall
 fi
+ MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>"
 log INFO "************************  PROGRAM TERMINATED $module ON $hostNAME ***********************************"
 graceful_exit
 
