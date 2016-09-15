@@ -182,7 +182,7 @@ _HERE_
         [ $# -ne 0 ] && Error 255
         [[ -z $PUPPET || -z $RELEASE  || -z $GATEWAY ]] && Error 255
         if ! Validip $PUPPET  ; then
-             MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "$PUPPET Not a valid IP" &&Error 255
+             MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "$PUPPET Not a valid IP" && Error 255
         fi
         hostNAME=$(sshExe hostname )
         hostNAME=$(echo $hostNAME |tr '\n' '')
@@ -308,7 +308,14 @@ _HERE_
     
     # Verify script parameters
     CheckParam "$@"
-    
+    #Test if the remote host can be reached
+  check=$(nmap -PN -p ssh $PUPPET | grep 'open')
+  if [[ $check ==  "" ]]; then
+     MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>"
+    log ERROR "Cannot connect to $PUPPET, ssh port not open or host not reachable. Please, check  ip address, routing, or ssh service available on remote host. "
+    error_exit
+  fi
+ 
     # the following steps are self explanatory....
     
     findRelease
