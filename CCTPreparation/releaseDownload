@@ -168,7 +168,7 @@ log() {
         [ $# -ne 0 ] && Error 255
         [[ -z $MGT || -z $RELEASE ]] && Error 255
         if ! Validip $MGT  ; then
-            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "$MGT Not a valid IP" &&Error 255
+            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "$MGT Not a valid IP" && Error 255
         fi
         hostNAME=$MGT
     }
@@ -209,6 +209,13 @@ SMBCLIENTCOMMANDS
  
     # Verify script parameters
     CheckParam "$@"
+     #Test if the remote host can be reached
+  check=$(nmap -PN -p 139 $MGT | grep 'open')
+  if [[ $check ==  "" ]]; then
+     MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>"
+    log ERROR "Cannot connect to $MGT, samba port not open or host not reachable. Please, check  ip address, routing, or samba service available on remote host. " && exit 299
+  fi
+
         # the following steps are self explanatory....
         validateRelease
 	 log WARN "Copying $RELEASE in //$MGT/$DELIVERY .... May takes some time."
