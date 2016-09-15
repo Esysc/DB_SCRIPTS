@@ -187,6 +187,14 @@ _HERE_
         hostNAME=$(sshExe hostname )
         hostNAME=$(echo $hostNAME |tr '\n' '')
     }
+
+    logCommand () {
+        while IFS= read -r line
+        do
+            log COPY  "$line"
+        done
+
+    }
     
     sshExe() {
         # "$@" command or function
@@ -263,8 +271,8 @@ _HERE_
             log WARN "Going to install them and prepare the environment"
             scpExe $MLDSCOREPATH "/tmp"
         fi
-        sshExe " cd /tmp/$(basename $MLDSCOREPATH) && rpm -ihv --replacepkgs *.rpm"
-        sshExe " $INSTALLCMD"
+        sshExe " cd /tmp/$(basename $MLDSCOREPATH) && rpm -ihv --replacepkgs *.rpm" | logCommand
+        sshExe " $INSTALLCMD" | logCommand
     }
     
     copyIsos() {
@@ -272,7 +280,7 @@ _HERE_
         for iso in $ISOPATH
         do
             log WARN "Copying $iso in $PUPPET:$ISOROOT"
-            scpExe $iso $ISOROOT
+            scpExe $iso $ISOROOT | logCommand
         done
 	log WARN "Sleeping 1 minutes for isomounter..."
         sleep 70
@@ -289,7 +297,7 @@ _HERE_
     
     addRelease () {
         log WARN "Adding release $RELEASE to production environment"
-        sshExe " addrelease -e production -r $RELPATH"
+        sshExe " addrelease -e production -r $RELPATH" | logCommand
     }
     
     setDefaultGw () {
@@ -307,10 +315,10 @@ _HERE_
     findIsos
     findMldsCore
     setDefaultGw
-    installMldsCore
-    copyIsos
+    installMldsCore | logCommand
+    copyIsos | logCommand
     mountPackager
-    addRelease
+    addRelease | logCommand
     
    MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&  log INFO "End of script execution"
     exit 0
