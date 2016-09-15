@@ -74,7 +74,7 @@ log() {
             line=${line//>/}
             line=${line//</}
             REST='{"returnstdout" : "'"$hostNAME"': '"$line"'"}'
-            URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
+            URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID/$level"
             METHOD="POST"
 	    SEND     
 	    REST="{\"salesorder\":\"$ID\",\"data\":\"$PROGNAME\",\"status\":\"$hostNAME\",\"message\":\"$MESSAGE\",\"dwprocessed\":1,\"creator\":1}"
