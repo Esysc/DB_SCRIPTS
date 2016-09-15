@@ -105,10 +105,9 @@ log() {
             REST='{"returnstdout" : "'"$hostNAME"': '"$line"'"}'
             URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
             if [[ "$level" == "COPY" ]]; then
-		METHOD="GET"
-            else
-            	METHOD="POST"
-	    fi
+		URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID/COPY"
+            fi
+            METHOD="POST"
             SEND
             REST="{\"salesorder\":\"$ID\",\"data\":\"$PROGNAME\",\"status\":\"$hostNAME\",\"message\":\"$MESSAGE\",\"dwprocessed\":1,\"creator\":1}"
             URI="http://$APISERVER/SPOT/provisioning/api/tempdata/$ID"
