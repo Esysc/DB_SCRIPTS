@@ -52,7 +52,7 @@ log() {
     SEND
   else
     REST='{"returnstdout" : "|'"$hostNAME"'| '"$line"'"}'
-    URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID"
+    URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID/$level"
     METHOD="POST"
     SEND
     REST="{\"salesorder\":\"$ID\",\"data\":\"$PROGNAME\",\"status\":\"$hostNAME\",\"message\":\"$MESSAGE\",\"dwprocessed\":1,\"creator\":1}"
@@ -100,6 +100,13 @@ _HERE_
 
   
 }
+logCommand () {
+        while IFS= read -r line
+        do
+            log COPY  "$line"
+        done
+
+    }
 
 # Scp  function
 scpExe () {
@@ -339,9 +346,9 @@ getHostname
 
 
 
-copyModules
+copyModules | logCommand
 if [ $provision -eq 1 ]; then
-  remoteInstall
+  remoteInstall | logCommand
 fi
  MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>"
 log INFO "************************  PROGRAM TERMINATED $module ON $hostNAME ***********************************"
