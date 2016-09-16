@@ -147,8 +147,8 @@ getHostname() {
 #Get the hostname of the conecerned host
 
   if [[ "$hostNAME" == "" ]]; then
-        hostNAME=$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -f root@$1 " hostname ")
-        hostNAME=$(echo "$hostNAME"| tr -d '\040\011\012\015')
+        hostNAME=$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -f root@$1 " echo $(hostname) ")
+        hostNAME=$(echo $hostNAME |tr '\n' '')
   fi
 
 

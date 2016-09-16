@@ -170,7 +170,8 @@ log() {
         if ! Validip $MGT  ; then
             MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "$MGT Not a valid IP" && Error 255
         fi
-        hostNAME=$MGT
+        hostNAME=$(nmblookup -A $MGT | grep '<00> -     '  | awk '{print $1}' | head -1)
+  	hostNAME=${hostNAME,,}
     }
     
     validateRelease () {

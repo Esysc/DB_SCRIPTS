@@ -184,7 +184,7 @@ _HERE_
         if ! Validip $PUPPET  ; then
              MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "$PUPPET Not a valid IP" && Error 255
         fi
-        hostNAME=$(sshExe hostname )
+        hostNAME=$(sshExe " echo $(hostname)" )
         hostNAME=$(echo $hostNAME |tr '\n' '')
     }
 
@@ -271,8 +271,8 @@ _HERE_
             log WARN "Going to install them and prepare the environment"
             scpExe $MLDSCOREPATH "/tmp"
         fi
-        sshExe " cd /tmp/$(basename $MLDSCOREPATH) && rpm -ihv --replacepkgs *.rpm" | logCommand
-        sshExe " $INSTALLCMD" | logCommand
+        sshExe " cd /tmp/$(basename $MLDSCOREPATH) && rpm -ihv --replacepkgs *.rpm"
+        sshExe " $INSTALLCMD" 
     }
     
     copyIsos() {
@@ -280,7 +280,7 @@ _HERE_
         for iso in $ISOPATH
         do
             log WARN "Copying $iso in $PUPPET:$ISOROOT"
-            scpExe $iso $ISOROOT | logCommand
+            scpExe $iso $ISOROOT 
         done
 	log WARN "Sleeping 1 minutes for isomounter..."
         sleep 70
@@ -297,7 +297,7 @@ _HERE_
     
     addRelease () {
         log WARN "Adding release $RELEASE to production environment"
-        sshExe " addrelease -e production -r $RELPATH" | logCommand
+        sshExe " addrelease -e production -r $RELPATH"
     }
     
     setDefaultGw () {
