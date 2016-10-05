@@ -166,7 +166,8 @@ $CURL  -d "{\"status\":\"<b>The iso image $ISO has been installed.<br />Client i
 wget -O /tmp/network-config-cli.sh http://x.x.x.203/Confnet/network-config-cli.sh
 chmod +x /tmp/network-config-cli.sh
 /tmp/network-config-cli.sh -n $hostname
-/tmp/network-config-cli.sh -c "\$(/tmp/network-config-cli.sh -a | awk '{print \$1}')" -i $ipaddress -m $netmask -g $gateway -R
+#/tmp/network-config-cli.sh -c "\$(/tmp/network-config-cli.sh -a | awk '{print \$1}')" -i $ipaddress -m $netmask -g $gateway -R
+/tmp/network-config-cli.sh -c "eth0 eth4" -i $ipaddress -m $netmask -g $gateway -R
 rm -f /tmp/network-config-cli.sh
 
 
@@ -175,7 +176,7 @@ echo $gateway'      time' >> /etc/hosts
 echo 'time' >> /etc/ntp/step-tickers
 #/bin/sed -i '/pool.ntp.org/d' /etc/ntp.conf
 echo 'server time' >> /etc/ntp.conf
-
+echo 'domain localdomain' > /etc/resolv.conf
 echo Installation number:  $salesOrder performed on $data >> /home/root/.syp_log
 
 %end
