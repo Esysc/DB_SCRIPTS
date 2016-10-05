@@ -1,4 +1,0 @@
-mondorestore -p rh66_v3 -n nfs://x.x.x.203:/lysis -d /lysis -Z iso
-
-
-./network.sh -n redhat01 -c "$(./network.sh -a | awk '{print $1}')" -i 10.0.129.38 -m 255.255.255.0 -g 10.0.129.101 -R
