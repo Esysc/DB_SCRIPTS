@@ -18,10 +18,10 @@ if [[ "$clientIP" != "" ]]; then
                 RET=144
                 log ERROR "I didn't found any pxe client at/on $rackPosition" 
         else
-                log INFO "Good! the client is a valid pxe client and it is well connected."
+                log INFO "Good! the client is a valid pxe client ( IP: $clientIP )and it is well connected."
 		log INFO "Going to find out WWN of all ports and check that the embedded raid controller is disabled ......"
-		log WARN "$( sshpass -p ***REMOVED***  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $clientIP 'for i in host0 host1 host2 host3;do echo \"port $i\";
- 		 cat  /sys/class/fc_host/$i/port_name;done;  hpssacli controller all show' 2>/dev/null )"
+		log WARN '\n'"$( sshpass -p ***REMOVED***  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $clientIP 'for i in host0 host1 host2 host3;do echo \"port $i\";
+ 		 cat  /sys/class/fc_host/$i/port_name;echo "1" > /sys/class/fc_host/$i/issue_lip;done;  hpssacli controller all show' 2>/dev/null )"
         fi
 else
         RET=144
