@@ -777,7 +777,7 @@ while [[ -n $1 ]]; do
   esac
   shift 2
 done
-clientIP="$(ifconfig | grep -A 1 'eth0' | tail -1 | cut -d ':' -f 2 | cut -d ' ' -f 1)"
+clientIP="$( ifconfig | awk '/inet addr/{print substr($2,6)}' | sort | head -n 1 )"
 
 PROGRESS=1
 

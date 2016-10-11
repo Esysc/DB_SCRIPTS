@@ -409,12 +409,18 @@ print $req->as_string;
 createMonitorRecord () {
  status="$1"
  PK="[$salesOrder][$rackPosition]"
+ INSTALLATIONIP="<table class='collection table table-bordered'>
+                        <tr><th>Dhcp ip</th><td>$clientIP</td></tr>
+                        <tr><th>Cyclades:Port</th><td>$cycladesip : $cycladesport</td></tr>
+                        <tr><th>Switch - Port</th><td>$switchip - $switchport</td></tr>
+              </table>"
+
  URI="http://x.x.x.204/SPOT/provisioning/api/provisioningnotifications/$PK"
 
                             REST="{
         \"notifid\":\"$PK\",
         \"hostname\":\"$hostname\",
-        \"installationip\":\"putty://$clientIP\",
+        \"installationip\":\"$INSTALLATIONIP\",
         \"configuredip\":\"$ipaddress\",
         \"status\":\"<b>$status</b>\",
         \"progress\":\"$PROGRESS\",
@@ -428,7 +434,7 @@ createMonitorRecord () {
         \"serial\":\"$MACHSERIAL\",
         \"os\":\"RedHat\"
         }"
-        SEND > /dev/null 2>&1 
+        SEND > /dev/null 2>&1
 
 }
 
@@ -793,8 +799,8 @@ log INFO "Set defaults value if not specified in command line..."
 # contact time server and set the correct soft and hw time
 syncTime
 
+clientIP="$( ifconfig | awk '/inet addr/{print substr($2,6)}' | sort | head -n 1 )"
 
-clientIP="$(ifconfig | grep -A 1 'eth0' | tail -1 | cut -d ':' -f 2 | cut -d ' ' -f 1)"
 image=$ISO
 iso_full_input_path="$isoPATH/$ISO"   # You may want to check validity of $2
  # Workaround for NFS file STALE
