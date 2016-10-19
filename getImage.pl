@@ -5,7 +5,7 @@
 # It's part of provisioning script
 # The direct ssh call is deprecated.
 
-# 2014 @A. cristalli
+# 2016 @A. cristalli
 #
 #
 use Backticks;
@@ -27,8 +27,8 @@ my $uname;
 my $results;
 my $username = 'admin';
 my $password = '2elleChap4';
-my $uri = "http://x.x.x.204/SPOT/provisioning/api/provisioningimages";
-my $list_uri = "http://x.x.x.204/SPOT/provisioning/api/provisioningimageses";
+my $uri = "http://spmgt.my.comp.ltd/SPOT/provisioning/api/provisioningimages";
+my $list_uri = "http://spmgt.my.comp.ltd/SPOT/provisioning/api/provisioningimageses";
 my $req = HTTP::Request->new( 'POST', $uri );
 $req->header( 'Content-Type' => 'application/json' );
 # set custom HTTP request header fields
@@ -90,7 +90,7 @@ switch ($system) {
 
                 }
 
-		my $cmd = "/usr/sbin/lsnim -t mksysb | awk '{print \$1}";
+		my $cmd = "/usr/sbin/lsnim -t mksysb | grep -E -v 'sysprod|BB'   | awk '{print \$1}' | sort";
 		$results = `$cmd`;
 #insert installation media type
 		@images = split('\n', $results->stdout);
