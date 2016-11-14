@@ -1,0 +1,19 @@
+#!/bin/bash
+
+
+
+
+EXEC="/var/lib/rancid/bin/hlogin"
+SWITCH=$1
+CONFFILE="/var/lib/rancid/Networking/configs/$SWITCH"
+
+if [ ! -f $CONFFILE ]; then
+echo "Usage: $0 <SwitchIP>"
+exit 2
+fi
+
+$EXEC   -c "show running-config "  $SWITCH
+
+
+
+

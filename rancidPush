@@ -1,0 +1,21 @@
+#!/bin/bash
+
+
+
+
+EXEC="/var/lib/rancid/bin/hlogin"
+SWITCH=$1
+CONFFILE="/var/lib/rancid/Networking/configs/$SWITCH"
+
+if [ ! -f $CONFFILE ]; then
+echo "Usage: $0 <SwitchIP>"
+exit 2
+fi
+NEWCONF=$(awk '{print $0";"}' $CONFFILE | sed '/^;/ d' | sed '/^password/ d')
+echo "Pushing the default configuration to switch"
+
+$EXEC   -c "conf t; $NEWCONF; write mem"  $SWITCH
+
+
+
+

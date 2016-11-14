@@ -1,0 +1,22 @@
+#!/bin/bash
+
+
+
+
+EXEC="/var/lib/rancid/bin/hlogin"
+SWITCH=$1
+CONFFILE="/var/lib/rancid/Networking/configs/$SWITCH"
+
+if [ ! -f $CONFFILE ]; then
+echo "Usage: $0 <SwitchIP>"
+exit 2
+fi
+
+RUNNING=$($EXEC   -c "show running-config "  $SWITCH)
+STARTUP=$($EXEC   -c "show config" $SWITCH)
+DIFF=$(diff  --side-by-side   --suppress-common-line <(echo "$RUNNING") <(echo "$STARTUP") | tail -n +4)
+echo "$DIFF" 
+
+
+
+

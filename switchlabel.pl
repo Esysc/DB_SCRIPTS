@@ -23,7 +23,7 @@ sub debug
 my $switchIP = $ARGV[0];
 my $snmpCommunity = $ARGV[1];
  
-my $numPorts = 48; # after this is trunks and vlans, which we're going to ignore
+my $numPorts = 24; # after this is trunks and vlans, which we're going to ignore
                                   # label them manually kthx
                                   # change me for big chassis switches
                                   # could become another (optional) config variable
