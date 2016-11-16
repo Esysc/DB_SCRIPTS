@@ -1,22 +1,232 @@
-#!/bin/bash
+#!/bin/bash 
+# ---------------------------------------------------------------------------
+# rancidDiff - Aim to get all diff in procurve switches.
 
+# Copyright 2016, root <root@drbl01>
+# All rights reserved.
 
+# Usage: rancidDiff [-h|--help] [-H|--host switch] 
 
+# Revision history:
+# 2016-11-21 Created by ACS
+# ---------------------------------------------------------------------------
 
+USER="sudo -i -u rancid"
 EXEC="/var/lib/rancid/bin/hlogin"
-SWITCH=$1
-CONFFILE="/var/lib/rancid/Networking/configs/$SWITCH"
+PROGNAME=${0##*/}
+VERSION="0.1"
+typeset MESSAGE="<img src='web/images/loader.gif' />"
+typeset STATUS="RUNNING"
+## Parse prog name to find an ID if executed from SPOTDB
 
-if [ ! -f $CONFFILE ]; then
-echo "Usage: $0 <SwitchIP>"
-exit 2
+ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
+
+## Global Variables
+
+typeset APISERVER="spmgt.my.comp.ltd" # IP address of the api server
+
+
+log() {
+  local level=${1?}
+  shift
+  local code=""
+  local line="[$(date '+%F %T')] $level: $*"
+  if [ -t 2 ]
+  then
+    case "$level" in
+      INFO) code=36 ;;
+      DEBUG) code=30 ;;
+      WARN) code=33 ;;
+      ERROR) code=31 ;;
+      *) code=37 ;;
+    esac
+    echo -e "\e[${code}m${line}\e[0m"
+  else
+    echo "$line"
+  fi >&2
+  line=${line//\"/\\\"}
+  line=${line//\\/\\\\}
+  line=${line//>/}
+  line=${line//</}
+   if [[ "$ID" == "" ]]; then
+    REST='{"title":"'"$PROGNAME"'","content":"'$line'","userid":"'$(whoami)'","date":"'$(date)'"}'
+    URI="http://$APISERVER/SPOT/provisioning/api/events"
+    METHOD="POST"
+    SEND
+  else
+    REST='{"returnstdout" : "'"$line"'"}'
+    URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID/$level"
+    METHOD="POST"
+    SEND
+    DATE=$(date +'%F %T')
+    REST="{\"salesorder\":\"$ID\",\"data\":\"$PROGNAME\",\"status\":\"$STATUS\",\"message\":\"$MESSAGE\",\"timestamps\":\"$DATE\",\"dwprocessed\":1,\"creator\":1}"
+    URI="http://$APISERVER/SPOT/provisioning/api/tempdata/$ID"
+    METHOD="PUT"
+    SEND
+  fi
+
+}
+
+
+SEND () {
+  (
+perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
+use integer;
+use POSIX qw(strftime);
+use Backticks;
+use Data::Dumper;
+use Sys::Hostname;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use JSON ;
+use feature qw(switch);
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use File::Path qw{mkpath};
+my $uri = shift;
+my $REST = shift;
+my $METHOD = shift;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( "$METHOD", "$uri" );
+$req->content($REST);
+my $resp = $lwp->request($req);
+print $req->as_string;
+#print Dumper $resp;
+_HERE_
+  )  >/dev/null 2>&1
+
+
+}
+
+
+getDiff () {
+
+CONFFILE="/var/lib/rancid/Networking/configs/$SWITCH"
+ #Test if the remote host can be reached
+  check=$(nmap -PN -p 23 $SWITCH | grep 'open')
+  if [[ $check ==  "" ]]; then
+    log ERROR "Cannot connect to $SWITCH, telnet port not open or host not reachable. Please, check  ip address, routing, or ssh service available on remote host. "
+    error_exit
+  fi
+  if [ ! -f $CONFFILE ]; then
+    log ERROR "The configuration file for the switch $SWITCH doesn't exist!"
+    error_exit
+  fi
+  TMPFILE="/tmp/$SWITCH"
+  CONFFILE="/var/lib/rancid/Networking/configs/$SWITCH"
+  $USER $EXEC   -c 'show running-config '  $SWITCH > $TMPFILE
+  #RUNNING=$($USER $EXEC -c "show running-config "  $SWITCH)
+  #STARTUP=$($USER $EXEC -c "show config" $SWITCH)
+  RUNNING=$(awk '/hostname/{flag=1;next}/password operator/{flag=0}flag'  $TMPFILE )
+  STARTUP=$(awk '/hostname/{flag=1;next}/password operator/{flag=0}flag' $CONFFILE )
+  MESSAGE=$(diff  -E -Z -b -B -w --suppress-blank-empty -y  --suppress-common-lines <(echo "$RUNNING") <(echo "$STARTUP") )
+  rm $TMPFILE
+}
+
+clean_up() { # Perform pre-exit housekeeping
+  return
+}
+
+error_exit() {
+  log ERROR  "${PROGNAME}: ${1:-"Unknown Error"}" >&2
+  clean_up
+  exit 1
+}
+
+graceful_exit() {
+  clean_up
+  exit
+}
+
+signal_exit() { # Handle trapped signals
+  case $1 in
+    INT)
+    error_exit "Program interrupted by user" ;;
+    TERM)
+      log WARN  "\n$PROGNAME: Program terminated" >&2
+    graceful_exit ;;
+    *)
+    error_exit "$PROGNAME: Terminating on unknown signal" ;;
+  esac
+}
+
+usage() {
+  log INFO  "Usage: $PROGNAME [-h|--help] [-H|--host switch]"
+  graceful_exit
+}
+
+help_message() {
+  log WARN "
+$PROGNAME ver. $VERSION
+  Aim to get the diff between running and startup config on HP Procurve.
+
+  $(usage)
+
+  Options:
+  -h, --help  Display this help message and exit.
+  -H, --host host  addresse IP of the procurve switch
+
+  NOTE: You must be the superuser to run this script.
+
+  "
+  return
+}
+
+test_args () {
+  #put here the mandatory params only::
+  [[ $SWITCH == "" ]] && log ERROR "Option -H is mandatory" && usage
+}
+# Trap signals
+trap "signal_exit TERM" TERM HUP
+trap "signal_exit INT"  INT
+
+# Check for root UID
+if [[ $(id -u) != 0 ]]; then
+  error_exit "You must be the superuser to run this script."
 fi
 
-RUNNING=$($EXEC   -c "show running-config "  $SWITCH)
-STARTUP=$($EXEC   -c "show config" $SWITCH)
-DIFF=$(diff  --side-by-side   --suppress-common-line <(echo "$RUNNING") <(echo "$STARTUP") | tail -n +4)
-echo "$DIFF" 
+if [ $# -eq 0 ]; then
+  usage
+fi
 
 
+# Parse command-line
+while [[ -n $1 ]]; do
+  case $1 in
+    -h | --help)
+    help_message; graceful_exit ;;
+    -H | --host)
+    shift; SWITCH="$1"; log INFO "addresse IP of the host $SWITCH" ;;
+    -* | --*)
+      error_exit "Unknown option $1"
+    usage ;;
+    *)
+    log INFO "Argument $1 to process..." ;;
+  esac
+  shift
+done
 
-
+test_args
+# Main logic
+getDiff
+STATUS="END"
+MESSAGE=$(echo "$MESSAGE" | grep -v "<" | grep -v ">")
+if [[ "$MESSAGE" != "" ]]; then
+   TABLE="<table class='table table-condensed table-bordered table-striped table-responsive'><tr><th class='alert alert-danger'>RUNNING</th><th class='alert alert-success'>STARTUP</th></tr>"
+   for line in "$MESSAGE"; do
+      ROW1=$(echo "$line" | awk -F "|" '{print $1}')
+      ROW2=$(echo "$line" | awk -F "|" '{print $2}')
+      TABLE="$TABLE<tr><td>$ROW1</td><td>$ROW2</td></tr>"
+   done
+   MESSAGE="$TABLE</table>"
+fi
+log COPY "$MESSAGE"
+graceful_exit
