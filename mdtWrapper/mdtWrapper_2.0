@@ -762,8 +762,8 @@ iDrac_gw=$gateway
 iDrac_passwd="***REMOVED***"
 log INFO "Settings for iDrac are: $iDrac_ip $iDrac_mask $iDrac_gw $iDrac_passwd $iDrac_hostname"
 log INFO "Launching the command /usr/sbin/set_idrac.sh $iDrac_ip $iDrac_mask $iDrac_gw $iDrac_passwd $iDrac_hostname"
-Set=$(/usr/sbin/set_idrac.sh $iDrac_ip $idrac_mask $iDrac_gw $iDrac_passwd $iDrac_hostname)
-log INFO "Finished to set IMM values"
+Set=$(/usr/sbin/set_idrac.sh $iDrac_ip $iDrac_mask $iDrac_gw $iDrac_passwd $iDrac_hostname)
+log INFO "Finished to set IDRAC values: $Set"
 }
 
 
