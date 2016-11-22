@@ -1,5 +1,35 @@
 
-In mdtWrapper_1.7 line 720:
+In mdtWrapper_2.0 line 32:
+VERSION="2.0"
+^-- SC2034: VERSION appears unused. Verify it or export it.
+
+
+In mdtWrapper_2.0 line 34:
+WEBSERVER="http://x.x.x.203"
+^-- SC2034: WEBSERVER appears unused. Verify it or export it.
+
+
+In mdtWrapper_2.0 line 225:
+$setINI RackShelf "$Rack"_"$Shelf"
+                         ^-- SC2140: The double quotes around this do nothing. Remove or escape them.
+
+
+In mdtWrapper_2.0 line 348:
+shelf=$(echo  "${Shelf##${Shelf%%?}}")
+      ^-- SC2116: Useless echo? Instead of 'cmd $(echo foo)', just use 'cmd foo'.
+
+
+In mdtWrapper_2.0 line 403:
+2) bootpip=$i;;
+   ^-- SC2034: bootpip appears unused. Verify it or export it.
+
+
+In mdtWrapper_2.0 line 645:
 ACTION=$(echo "$confnetContent" > $confnetFile)
        ^-- SC2116: Useless echo? Instead of 'cmd $(echo foo)', just use 'cmd foo'.
+
+
+In mdtWrapper_2.0 line 1266:
+                        PowerEdge=$(checkPowerEdge)
+                        ^-- SC2034: PowerEdge appears unused. Verify it or export it.
 

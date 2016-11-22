@@ -753,6 +753,18 @@ Set=$(/usr/sbin/set_imm.sh $IMM_ip $IMM_mask $IMM_gw $IMM_hostname)
 log INFO "Finished to set IMM values"
 }
 
+setIDRAC () {
+
+iDrac_hostname="iDrac$hostname"
+iDrac_ip=$iloipaddress
+iDrac_mask=$ilonetmask
+iDrac_gw=$gateway
+iDrac_passwd="***REMOVED***"
+log INFO "Settings for iDrac are: $iDrac_ip $iDrac_mask $iDrac_gw $iDrac_passwd $iDrac_hostname"
+log INFO "Launching the command /usr/sbin/set_idrac.sh $iDrac_ip $iDrac_mask $iDrac_gw $iDrac_passwd $iDrac_hostname"
+Set=$(/usr/sbin/set_idrac.sh $iDrac_ip $idrac_mask $iDrac_gw $iDrac_passwd $iDrac_hostname)
+log INFO "Finished to set IMM values"
+}
 
 
 #function to check if EliteDesk desktop machine
@@ -782,6 +794,21 @@ echo "NOK"
 fi
 
 }
+
+#Functions to configure PowerEdge servers
+
+checkPowerEdge () {
+
+check=$(dmidecode -s system-product-name | grep PowerEdge ||  echo 'NOK')
+log WARN "Check Proliant result: $check"
+if [[  "$check" != *"NOK"* ]]; then
+echo "OK"
+else
+echo "NOK"
+fi
+
+}
+
 
 log() {
 local level=${1?}
@@ -1234,14 +1261,20 @@ else
 #               setIBMRaid "raid1.ini"
 		setIMM
 		else
-			#check if HP EliteDesk
-#			log INFO "Check if this is a EliteDesk desktop machine....."
-#			ELITE=$(checkEliteDesk)
-#			if [[ "$ELITE" == "OK" ]]; then
-        		#		clonePEonHDD &
-			log INFO "This is a standard machine or VM, cleaning the disk(s)"
-			destroyDisks
-#		fi
+		        #check if PowerEdge
+			log INFO "Checking if the server is a PowerEdge......"
+                        PowerEdge=$(checkPowerEdge)
+                        if [[ "$PowerEdge" == "OK" ]]; then
+				setIDRAC
+				else
+					#check if HP EliteDesk
+#					log INFO "Check if this is a EliteDesk desktop machine....."
+#					ELITE=$(checkEliteDesk)
+#					if [[ "$ELITE" == "OK" ]]; then
+        				#		clonePEonHDD &
+					log INFO "This is a standard machine or VM, cleaning the disk(s)"
+					destroyDisks
+			fi
 		fi
 		#the SSH execution is assured in the function
 	fi
