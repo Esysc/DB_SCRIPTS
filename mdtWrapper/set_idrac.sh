@@ -40,7 +40,7 @@ iDrac_hostname=$5
 #LAN=$(for i in {0..15}; do ipmitool lan print $i 2>/dev/null | grep -q ^Set && echo Channel $i; done | awk '{print $2}')
 LAN=1
 echo "channel is: $LAN"
-
+ipmitool chassis bootdev pxe
 ipmitool lan set $LAN ipsrc static
 ipmitool lan set $LAN ipaddr $iDrac_ip
 ipmitool lan set $LAN netmask $iDrac_mask

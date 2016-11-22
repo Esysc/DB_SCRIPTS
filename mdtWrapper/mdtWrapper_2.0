@@ -800,7 +800,7 @@ fi
 checkPowerEdge () {
 
 check=$(dmidecode -s system-product-name | grep PowerEdge ||  echo 'NOK')
-log WARN "Check Proliant result: $check"
+log WARN "Check PowerEdge result: $check"
 if [[  "$check" != *"NOK"* ]]; then
 echo "OK"
 else
@@ -1266,6 +1266,7 @@ else
                         PowerEdge=$(checkPowerEdge)
                         if [[ "$PowerEdge" == "OK" ]]; then
 				setIDRAC
+				 destroyDisks
 				else
 					#check if HP EliteDesk
 #					log INFO "Check if this is a EliteDesk desktop machine....."
