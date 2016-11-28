@@ -582,14 +582,14 @@ ping 9.1.1.1 -n 1 -w 60000 > nul
 fi
 
 confnetContent="$confnetContent
-:: This section is commented because is not working as it should (os hangs at startup)
-:: Run windows updates again......
-::	net use X: \\\\x.x.x.203\\Images
+:: Let post to http monitoring service the new status
+	net use z: \\\\x.x.x.203\\Images
 
-::        cd /D X:\\MDT\\Scripts\\wsusoffline\\client\\cmd
-        :: Call DoUpdate to update the os
-::       call DoUpdate.cmd
-
+        cd /D z:\\MDT\\Scripts\\choco
+	set CURL=curl.exe  --globoff -i -v -A \"perl\" -X PUT -H \"Content-Type: application/json\" -H \"Accept: application/json\"
+        set PK=[$salesOrder][$Rack"_"$Shelf]
+        set URL=http://x.x.x.204/SPOT/provisioning/api/provisioningnotifications/%PK%
+        %CURL% -d \"{\\\"status\\\":\\\"^<b^>GOOD! Final configuration is running. THe machine is  ready.^</b^>\\\",\\\"progress\\\":\\\"100\\\"}\" %URL%
 
 echo \"About to set interface name and ip address **********************\"
 
@@ -622,7 +622,7 @@ CALL C:\\bginfo\\bginfo.bat
 if [[ ! -z $salesOrder ]]; then
 data=$(date)
 confnetContent="$confnetContent
-echo Installation number: $salesOrder performed on $data > C:\Windows\syp_log
+echo Installation number: $salesOrder performed on $data > C:\\Windows\\syp_log
 "
 fi
 confnetContent="$confnetContent
