@@ -519,6 +519,7 @@ createConfnet () {
 confnetFile="$CONFNETDIR/"$hwaddr"_confnet.bat"
 
 confnetContent="
+@echo off
 REM
 REM This script do final configuration
 REM Scope 1 : change ip address
@@ -527,13 +528,22 @@ REM Scope 3 : Eventually activate windows
 REM Scope 4 : Separate exe files from all the rest per release
 
 
+REM Mount remote dir fist
+net use z: \\\\x.x.x.203\\Images
 
+
+call:notifyPro 80 \"Final Configuration is running right now ...\"
+
+
+call:notifyPro 83 \"Disabling Firewall and resetting the proxy\"
 NetSh Advfirewall set allprofiles state off
 NetSh winhttp reset proxy
 reg add HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer /v HideSCAHealth /t REG_DWORD /d 0x1 /f
 "
 if [[ $radmin -eq 1  && $cz -eq 1 ]] ; then
 confnetContent="$confnetContent
+
+call:notifyPro 85 \"Restarting Radmin server service\"
 %windir%\\SysWOW64\\rserver30\\Rserver3.exe /stop
 %windir%\\SysWOW64\\rserver30\\Rserver3.exe /start
 
@@ -544,31 +554,35 @@ sc config lmhosts start= auto
 sc start lmhosts
 sc config wscsvc start= disabled
 
-if exist C:\\Mycompany\\delivery (
-cd C:\\Mycompany\\delivery
-for  /D  %%d IN (C:\\Mycompany\\delivery\\*) DO (
-				if exist %%d (
-                echo \"Creating %%d.GUI **********************\"
 
-                mkdir %%d.GUI
+REM if exist C:\\Mycompany\\delivery (
+REM call:notifyPro 87 \"Preparing .exe files in separate directory\"
 
-                                cd %%d
-                                FOR  /R  %%e IN (*.exe) DO (
-                                echo \"Moving %%e in %%d.GUI **********************\"
-                                move /Y %%e %%d.GUI
-				echo \"Installing %%e\"
-                                call %%e /S /W /F
-
-                                )
-								)
-
-                )
-
-)
+REM cd C:\\Mycompany\\delivery
+REM for  /D  %%d IN (C:\\Mycompany\\delivery\\*) DO (
+REM				if exist %%d (
+REM                echo \"Creating %%d.GUI **********************\"
+REM
+REM                mkdir %%d.GUI
+REM
+REM                             cd %%d
+REM                             FOR  /R  %%e IN (*.exe) DO (
+REM                             echo \"Moving %%e in %%d.GUI **********************\"
+REM                             move /Y %%e %%d.GUI
+REM				echo \"Installing %%e\"
+REM                             call %%e /S /W /F
+REM
+REM                             )
+REM								)
+REM
+REM                )
+REM
+REM )
 "
   if [[ ! -z "$productKey" ]]; then
 
 confnetContent="$confnetContent
+call:notifyPro 90 \"Activating Windows..........\"
 echo \"Activating Windows..........\"
 net time \\\\mdt01 /SET /YES
 cscript /b %windir%\\system32\\slmgr.vbs -upk
@@ -577,22 +591,14 @@ cscript /b %windir%\\system32\\slmgr.vbs -ipk $productKey
 ping 9.1.1.1 -n 1 -w 10000 > nul
 cscript /b %windir%\\system32\\slmgr.vbs -ato
 ping 9.1.1.1 -n 1 -w 60000 > nul
+call:notifyPro 95 \"Windows should be activated\"
 "
 
 fi
 
 confnetContent="$confnetContent
-:: Let post to http monitoring service the new status
-	net use z: \\\\x.x.x.203\\Images
-
-        cd /D z:\\MDT\\Scripts\\choco
-	set CURL=curl.exe  --globoff -i -v -A \"perl\" -X PUT -H \"Content-Type: application/json\" -H \"Accept: application/json\"
-        set PK=[$salesOrder][$Rack"_"$Shelf]
-        set URL=http://x.x.x.204/SPOT/provisioning/api/provisioningnotifications/%PK%
-        %CURL% -d \"{\\\"status\\\":\\\"^<b^>GOOD! Final configuration is running. THe machine is  ready.^</b^>\\\",\\\"progress\\\":\\\"100\\\"}\" %URL%
-
 echo \"About to set interface name and ip address **********************\"
-
+call:notifyPro 100 \"GOOD! Final configuration is running. The machine is ready.\"
 REM This is done in cs.ini
 REM netsh interface set interface name = \"Local Area Connection\" newname = \"CTRL\"
 "
@@ -605,7 +611,8 @@ fi
 
 if [[ ! -z "$gateway" ]]; then
 confnetContent="$confnetContent
-wmic nicconfig where MACAddress=\"$hwaddr\" call SetGateways (\"$gateway\"), (\"1\")
+route add 0.0.0.0 mask 0.0.0.0 $gateway -p
+REM wmic nicconfig where MACAddress=\"$hwaddr\" call SetGateways (\"$gateway\"), (\"1\")
 "
 fi
 
@@ -615,7 +622,7 @@ ipconfig /flushdns
 
 if exist C:\\bginfo (
 echo \"About to update its background infos **********************\"
-
+cd /D C:\bginfo
 CALL C:\\bginfo\\bginfo.bat
 )
 "
@@ -637,9 +644,17 @@ reg add \"HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Winlog
 reg add \"HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\" /v DefaultDomainName /d \"\" /f
 REM reg add \"HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\" /v AutoLogonCount /d &H00000000
 
-
 shutdown -r -t 30
 DEL \"%~f0\"
+
+:notifyPro
+:: Let post to http monitoring service the new ddstatus
+        cd /D z:\\MDT\\Scripts\\choco
+        set CURL=curl.exe  --globoff -i -v -A \"perl\" -X PUT -H \"Content-Type: application/json\" -H \"Accept: application/json\"
+        set PK=[$salesOrder][$Rack"_"$Shelf]
+        set URL=http://x.x.x.204/SPOT/provisioning/api/provisioningnotifications/%PK%
+        %CURL% -d \"{\\\"status\\\":\\\"^<b^>%~2^</b^>\\\",\\\"progress\\\":\\\"%~1\\\"}\" %URL%
+goto:eof
 "
 #Write the confnet file on server
 ACTION=$(echo "$confnetContent" > $confnetFile)
