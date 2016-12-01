@@ -590,8 +590,8 @@ ping 9.1.1.1 -n 1 -w 10000 > nul
 cscript /b %windir%\\system32\\slmgr.vbs -ipk $productKey
 ping 9.1.1.1 -n 1 -w 10000 > nul
 cscript /b %windir%\\system32\\slmgr.vbs -ato
-ping 9.1.1.1 -n 1 -w 60000 > nul
 call:notifyPro 95 \"Windows should be activated\"
+ping 9.1.1.1 -n 1 -w 60000 > nul
 "
 
 fi
@@ -599,6 +599,7 @@ fi
 confnetContent="$confnetContent
 echo \"About to set interface name and ip address **********************\"
 call:notifyPro 100 \"GOOD! Final configuration is running. The machine is ready.\"
+ping 9.1.1.1 -n 1 -w 30000 > nul
 REM This is done in cs.ini
 REM netsh interface set interface name = \"Local Area Connection\" newname = \"CTRL\"
 "
