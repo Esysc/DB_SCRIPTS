@@ -61,6 +61,7 @@ valid_ip $rackPosition
 
 clientIP=$(findIPMAC $rackPosition "IP" 2>/dev/null | head -1)
 if [[ "$clientIP" != "" ]]; then
+       echo "IP: $clientIP"
         ping -c 1 $clientIP  > /dev/null 2>&1
         PING=$?
         if [[ $PING -ne 0 ]] ; then
@@ -237,6 +238,7 @@ client_mac=$(echo "${client_mac,,}")
         else
         return 1
         fi
+echo "IP: $ip_client_ctrl"
 fi
 }
 
