@@ -166,8 +166,8 @@ $CURL  -d "{\"status\":\"<b>The iso image $ISO has been installed.<br />Client i
 wget -O /tmp/network-config-cli.sh http://x.x.x.203/Confnet/network-config-cli.sh
 chmod +x /tmp/network-config-cli.sh
 /tmp/network-config-cli.sh -n $hostname
-#/tmp/network-config-cli.sh -c "\$(/tmp/network-config-cli.sh -a | awk '{print \$1}')" -i $ipaddress -m $netmask -g $gateway -R
-/tmp/network-config-cli.sh -c "eth0 eth4" -i $ipaddress -m $netmask -g $gateway -R
+/tmp/network-config-cli.sh -c "\$(/tmp/network-config-cli.sh -a | awk '{print \$1}') \$(/tmp/network-config-cli.sh -a | awk '{print \$5}')" -i $ipaddress -m $netmask -g $gateway -R
+#/tmp/network-config-cli.sh -c "eth0 eth4" -i $ipaddress -m $netmask -g $gateway -R
 rm -f /tmp/network-config-cli.sh
 
 
