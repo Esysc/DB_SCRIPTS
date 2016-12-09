@@ -268,27 +268,26 @@ _HERE_
 if [[ ! -z $salesOrder && ! -z $nimclient ]]; then
 PK="["$salesOrder"]["$nimclient"]"
 URI="http://$APISERVER/SPOT/provisioning/api/provisioningnotifications/$PK"
-        REST="{
-        \"notifid\":\"$PK\",
-        \"hostname\":\"$hostname\",
-        \"installationip\":\"$INSTALLATIONIP\",
-        \"configuredip\":\"$ipaddress\",
-        \"status\":\"<b>$line</b>\",
-        \"progress\":\"$PROGRESS\",
-        \"image\":\"$image\",
-        \"firmware\":\"IBM OpenFirmware\",
-        \"ram\":\"N/D\",
-        \"cpu\":\"N/D\",
-        \"diskscount\":\"N/D\",
-        \"netintcount\":\"N/D\",
-        \"model\":\"N/D\",
-        \"serial\":\"N/D\",
-        \"os\":\"$SPOT\"
-        }"
+        REST='{
+        "notifid":"'$PK'",
+        "hostname":"'$hostname'",
+        "installationip":"'$INSTALLATIONIP'",
+        "configuredip":"'$ipaddress'",
+        "status":"<b>'$line'</b>",
+        "progress":"'$PROGRESS'",
+        "image":"'$imagei'",
+        "firmware":"IBM OpenFirmware",
+        "ram":"N/D",
+        "cpu":"N/D",
+        "diskscount":"N/D",
+        "netintcount":"N/D",
+        "model":"N/D",
+        "serial":"N/D",
+        "os":"'$SPOT'"
+        }'
 
         # Write monitoring infos to web service
 SEND >/dev/null 2>&1 
-
 fi
 
 }
@@ -297,6 +296,7 @@ SEND () {
 
 
 perl -e '
+#!/usr/bin/env perl
 use integer;
 use POSIX qw(strftime);
 use Data::Dumper;
@@ -310,18 +310,45 @@ use Switch;
 use HTTP::Cookies;
 use HTTP::Request;
 use LWP;
-my $REST = shift;
+use JSON;
 my $uri = shift;
+my $PK = shift;
+my $hostname = shift;
+my $INSTALLATIONIP = shift;
+my $ipaddress = shift;
+my $line = shift;
+my $PROGRESS = shift;
+my $image = shift;
+my $SPOT = shift;
+my %REST = (
+"notifid" => $PK,
+"hostname" => $hostname,
+"installationip" => $INSTALLATIONIP,
+"configuredip" => $ipaddress,
+"status" => "<b>$line</b>",
+"progress" => $PROGRESS,
+"image" => $image,
+"firmware" => "IBM OpenFirmware",
+"ram" => "N/D",
+"cpu" => "N/D",
+"diskscount" => "N/D",
+"netintcount" => "N/D",
+"model" => "N/D",
+"serial" => "N/D",
+"os" => $SPOT
+);
+
+my $json  = encode_json \%REST;
 my $lwp = LWP::UserAgent->new(
                         timeout               => 10,
 );
 my $req = HTTP::Request->new( "PUT", "$uri" );
-$req->content($REST);
+$req->content($json);
 my $resp = $lwp->request($req);
 print $req->as_string;
-#print Dumper $resp;
+print Dumper $resp;
 exit;
-' "$REST" "$URI"
+' "$URI" "$PK" "$hostname" "$INSTALLATIONIP" "$ipaddress" "$line" "$PROGRESS" "$image" "$SPOT"
 
 
 }
