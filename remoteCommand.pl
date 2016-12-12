@@ -52,7 +52,8 @@ my $file_path = "/tmp/";
 my $f;
 my @scheduled_time;
 my $flag;
-my $REST;
+my %REST;
+my $json;
 my $cmd;
 my $ret = 0;
 my $list;
@@ -243,7 +244,6 @@ my $result;
 for ( my $c = 0; $c < $size; $c++) {
 	my $uri = $REST_SERVER."/SPOT/provisioning/api/remotecommands/";
 
-#	$REST = 
 #build the string
 	my $uri_put = $uri.$remoteCommandID[$c];
 	my $req = HTTP::Request->new( 'PUT', $uri_put );
@@ -256,7 +256,7 @@ for ( my $c = 0; $c < $size; $c++) {
 	my $lwp = LWP::UserAgent->new(
 			timeout               => 10,
 			);
-	$REST = '{"remotecommandid" : "'.$remoteCommandID[$c].'", "salesorder" : "'.$so[$c]. '", "rack" : "'.$rack[$c].'", "shelf" : "'.$shelf[$c].'", "exectime" : "'.$execTime[$c].'",  ';
+         %REST = ('remotecommandid' => $remoteCommandID[$c], 'salesorder' => $so[$c], 'rack' => $rack[$c] , 'shelf' => $shelf[$c], 'exetime' => $execTime[$c] );
 		@scheduled_time = split(':', $execTime[$c]);
 		if ($exeFlag[$c] == 0 || ($exeFlag[$c] == 100 && $now_string == $scheduled_time[0])) {
 
@@ -301,11 +301,11 @@ for ( my $c = 0; $c < $size; $c++) {
 		if ($exeSeq[$c] == 0)
 		{	
 			# Put the command in execution date on the database to avoid to be executed two times
-                        my $TEMP; # hold the temporary reponse
                                 $flag = 9;
                         $ret = 9;
-                        $TEMP =  $REST.'"executionflag" : "'.$flag.'", "returncode" : "'.$ret.'", "returnstdout" : "The script is going to be executed. The command running is: '.$cmdDisplay.'" }';
-                $req->content($TEMP);
+                        %REST = ('executionflag' => $flag , 'returncode' => $ret , 'returnstdout' =>  'The script is going to be executed. The command running is: '.$cmdDisplay);
+			$json = encode_json \%REST;
+                $req->content($json);
                 my $resp = $lwp->request($req);
                 print $req->as_string;
                 print Dumper $resp;
@@ -315,14 +315,15 @@ for ( my $c = 0; $c < $size; $c++) {
 			$ret = $?/256;
 			if ($ret == 0 || $ret == 145 ){
 				$flag = ($exeFlag[$c] == 0) ? 1:101;
-				$REST = $REST. '"executionflag" : "'.$flag.'", "returncode" : "'.$ret.'" }';
+				%REST =  ('executionflag' => $flag , 'returncode' => $ret );
+				
 		#		$REST = $REST. '"executionflag" : "'.$flag.'", "returncode" : "'.$ret.'", "returnstdout" : "Script Launched '.$cmdDisplay.'" }';
 		}
 		else
 		{
 			$ret = $?/256;
 			$flag = ($exeFlag[$c] == 0) ? 2:102;
-			$REST = $REST.'"executionflag" : "'.$flag.'", "returncode" : "'.$ret.'", "returnstdout" : "execution FAILED" }'
+			%REST =  ('executionflag' => $flag , 'returncode' => $ret , 'returnstderr' => 'The script return an error code, may be not important.');
 	}
 
 }
@@ -341,22 +342,22 @@ else
 	if ($ret == 0 || $ret == 145 ){
 #		if ( $result->success ) { 
 	$flag = ($exeFlag[$c] == 0) ? 1:101;
-	$REST = $REST.'"executionflag" : "'.$flag.'" , "returncode" : "'.$ret.'" , "returnstdout" : "'.$stdout.'", "returnstderr" : "'.$stderr.'"}';  
+        %REST =  ('executionflag' => $flag , 'returncode' => $ret , 'returnstderr' => $stderr , 'returnstdout' => $stdout );
 	}
 	else { 
 		$flag = ($exeFlag[$c] == 0) ? 2:102;
-		$REST = $REST.'"executionflag" : "'.$flag.'" , "returncode" : "'.$ret.'", "returnstdout" : "'.$stdout.'", "returnstderr" : "'.$stderr.'"}';  
+                  %REST =  ('executionflag' => $flag , 'returncode' => $ret , 'returnstderr' => $stderr , 'returnstdout' => $stdout );
 }
 }
 }
 elsif ($exeFlag[$c] == 101 && $now_string != $scheduled_time[0]) {
 	$flag = 100;
-	$REST = $REST.'"executionflag" : "'.$flag.'"}';
+         %REST =  ('executionflag' => $flag );
 
 	}
 
-
-$req->content($REST);
+ $json = encode_json \%REST;
+$req->content($json);
 my $resp = $lwp->request($req);
 print $req->as_string;
 print Dumper $resp;

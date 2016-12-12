@@ -59,14 +59,62 @@ log() {
     METHOD="POST"
     SEND
     DATE=$(date +'%F %T')
-    REST="{\"salesorder\":\"$ID\",\"data\":\"$PROGNAME\",\"status\":\"$STATUS\",\"message\":\"$MESSAGE\",\"timestamps\":\"$DATE\",\"dwprocessed\":1,\"creator\":1}"
     URI="http://$APISERVER/SPOT/provisioning/api/tempdata/$ID"
     METHOD="PUT"
-    SEND
+    SENDTEMP
   fi
 
 }
 
+SENDTEMP () {
+
+
+perl -e '
+#!/usr/bin/env perl
+use integer;
+use POSIX qw(strftime);
+use Data::Dumper;
+use Socket;
+use LWP::UserAgent;
+use LWP::Simple;
+use strict;
+use warnings;
+use integer;
+use Switch;
+use HTTP::Cookies;
+use HTTP::Request;
+use LWP;
+use JSON;
+my $uri = shift;
+my $ID = shift;
+my $PROGNAME = shift;
+my $STATUS = shift;
+my $MESSAGE = shift;
+my $DATE = shift;
+my %REST = (
+"salesorder" => $ID,
+"data" => $PROGNAME,
+"status" => $STATUS,
+"message" => $MESSAGE,
+"timestamps" => $DATE,
+"dwprocessed" => 1,
+"creator" => 1
+);
+
+my $json  = encode_json \%REST;
+my $lwp = LWP::UserAgent->new(
+                        timeout               => 10,
+);
+my $req = HTTP::Request->new( "PUT", "$uri" );
+$req->content($json);
+my $resp = $lwp->request($req);
+print $req->as_string;
+print Dumper $resp;
+exit;
+' "$URI" "$ID" "$PROGNAME" "$STATUS" "$MESSAGE" "$DATE"
+
+
+}
 
 SEND () {
   (
@@ -99,17 +147,16 @@ my $req = HTTP::Request->new( "$METHOD", "$uri" );
 $req->content($REST);
 my $resp = $lwp->request($req);
 print $req->as_string;
-#print Dumper $resp;
+print Dumper $resp;
 _HERE_
-  )  >/dev/null 2>&1
+  )  #>/dev/null 2>&1
 
 
 }
 
 
 getDiff () {
-
-CONFFILE="/var/lib/rancid/Networking/configs/$SWITCH"
+CONFFILE="/var/lib/rancid/CVS/Networking/configs/Attic/$SWITCH,v"
  #Test if the remote host can be reached
   check=$(nmap -PN -p 23 $SWITCH | grep 'open')
   if [[ $check ==  "" ]]; then
@@ -121,7 +168,7 @@ CONFFILE="/var/lib/rancid/Networking/configs/$SWITCH"
     error_exit
   fi
   TMPFILE="/tmp/$SWITCH"
-  CONFFILE="/var/lib/rancid/Networking/configs/$SWITCH"
+  #CONFFILE="/var/lib/rancid/Networking/configs/$SWITCH"
   $USER $EXEC   -c 'show running-config '  $SWITCH > $TMPFILE
   #RUNNING=$($USER $EXEC -c "show running-config "  $SWITCH)
   #STARTUP=$($USER $EXEC -c "show config" $SWITCH)
