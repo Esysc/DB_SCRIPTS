@@ -13,6 +13,7 @@
 
 PROGNAME=${0##*/}
 VERSION="0.1"
+declare -a REST
 typeset MESSAGE="<div class='alert alert-danger blinking'>Executing $PROGNAME ..... Be patience</div>"
 ## Parse prog name to find an ID if executed from SPOTDB
 
@@ -46,26 +47,28 @@ log() {
   line=${line//>/}
   line=${line//</}
    if [[ "$ID" == "" ]]; then
-    REST='{"title":"'"$PROGNAME"'","content":"'$line'","userid":"'`whoami`'","date":"'`date`'"}'
+    REST=("title" "$PROGNAME" "content" "$line" "userid" "`whoami`" "date" "`date`")
     URI="http://$APISERVER/SPOT/provisioning/api/events"
     METHOD="POST"
     SEND
   else
-    REST='{"returnstdout" : "|'"$hostNAME"'| '"$line"'"}'
+    if [[ "$hostNAME" == "" ]]; then hostNAME=$host; fi
+    REST=("returnstdout" "| $hostNAME | $line")
     URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID/$level"
     METHOD="POST"
     SEND
-    REST="{\"salesorder\":\"$ID\",\"data\":\"$PROGNAME\",\"status\":\"$hostNAME\",\"message\":\"$MESSAGE\",\"dwprocessed\":1,\"creator\":1}"
+    REST=("salesorder" "$ID" "data" "$PROGNAME" "status" "$hostNAME" "message" "$MESSAGE" "dwprocessed" "1" "creator" "1")
     URI="http://$APISERVER/SPOT/provisioning/api/tempdata/$ID"
     METHOD="PUT"
     SEND
   fi
 
+
 }
 
 SEND () {
   (
-perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
+perl - "$URI" "$METHOD" "${REST[@]}" <<'_HERE_'
 use integer;
 use POSIX qw(strftime);
 use Backticks;
@@ -85,13 +88,22 @@ use HTTP::Request;
 use LWP;
 use File::Path qw{mkpath};
 my $uri = shift;
-my $REST = shift;
 my $METHOD = shift;
+my %REST;
+my $item;
+my $value;
+while (@ARGV) {
+    $item = shift @ARGV;
+    $value = shift @ARGV;
+    $REST{$item} = $value;
+
+}
+my $json  = encode_json \%REST;
 my $lwp = LWP::UserAgent->new(
                         timeout               => 10,
 );
 my $req = HTTP::Request->new( "$METHOD", "$uri" );
-$req->content($REST);
+$req->content($json);
 my $resp = $lwp->request($req);
 print $req->as_string;
 #print Dumper $resp;
@@ -146,13 +158,7 @@ getHostname() {
 
 #Get the hostname of the conecerned host
 
-  if [[ "$hostNAME" == "" ]]; then
-        hostNAME=$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -f root@$1 " echo $(hostname) ")
-        hostNAME=$(echo $hostNAME |tr '\n' '')
-  fi
-
-
-
+        hostNAME=$(sshpass -p $password ssh  -n -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -f root@$1 hostname)
 }
 copyModules () {
   baseDir="/home/operator/delivery"
@@ -342,7 +348,7 @@ test_args
   fi
 
 
-getHostname
+getHostname $host
 
 
 

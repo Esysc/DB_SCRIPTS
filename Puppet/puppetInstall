@@ -26,7 +26,7 @@
 #@(#)   -g        : Gateway to assign to puppet (should be the ip address of mgt)
 #@(#)   -r        : solution release name to add to production environment
 #@(#)------------------------------------------------------
-
+declare -a REST
 typeset PROGNAME=${0##*/}
 typeset VERSION="1.1"
 typeset PACKAGER="/packager/delivery/Customers/"
@@ -73,20 +73,21 @@ log() {
             line=${line//\\/\\\\}
             line=${line//>/}
             line=${line//</}
-            REST='{"returnstdout" : "'"$hostNAME"': '"$line"'"}'
+	    if [[ "$hostNAME" == "" ]]; then hostNAME=$PUPPET; fi
+    	    REST=("returnstdout" "| $hostNAME | $line")
             URI="http://$APISERVER/SPOT/provisioning/api/logWrapper/$ID/$level"
             METHOD="POST"
-	    SEND     
-	    REST="{\"salesorder\":\"$ID\",\"data\":\"$PROGNAME\",\"status\":\"$hostNAME\",\"message\":\"$MESSAGE\",\"dwprocessed\":1,\"creator\":1}"
+	    SEND   
+	    REST=("salesorder" "$ID" "data" "$PROGNAME" "status" "$hostNAME" "message" "$MESSAGE" "dwprocessed" "1" "creator" "1")  
             URI="http://$APISERVER/SPOT/provisioning/api/tempdata/$ID"
             METHOD="PUT"
 	    SEND        
         fi
     }
-    SEND () {
-        
-        (
-perl - "$URI" "$REST"  "$METHOD" <<'_HERE_'
+
+	SEND () {
+  (
+perl - "$URI" "$METHOD" "${REST[@]}" <<'_HERE_'
 use integer;
 use POSIX qw(strftime);
 use Backticks;
@@ -106,22 +107,33 @@ use HTTP::Request;
 use LWP;
 use File::Path qw{mkpath};
 my $uri = shift;
-my $REST = shift;
 my $METHOD = shift;
+my %REST;
+my $item;
+my $value;
+while (@ARGV) {
+    $item = shift @ARGV;
+    $value = shift @ARGV;
+    $REST{$item} = $value;
+
+}
+my $json  = encode_json \%REST;
 my $lwp = LWP::UserAgent->new(
                         timeout               => 10,
 );
 my $req = HTTP::Request->new( "$METHOD", "$uri" );
-$req->content($REST);
+$req->content($json);
 my $resp = $lwp->request($req);
 print $req->as_string;
 #print Dumper $resp;
 _HERE_
-        )   >/dev/null 2>&1
+  )  >/dev/null 2>&1
+
+
+	}
+    
         
         
-        
-    }
     CheckParam() {
         Validip() {
             ERROR=0
@@ -184,8 +196,7 @@ _HERE_
         if ! Validip $PUPPET  ; then
              MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" && log ERROR "$PUPPET Not a valid IP" && Error 255
         fi
-        hostNAME=$(sshExe " echo $(hostname)" )
-        hostNAME=$(echo $hostNAME |tr '\n' '')
+        hostNAME=$(sshExe hostname )
     }
 
     logCommand () {

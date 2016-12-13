@@ -101,10 +101,10 @@ KSPRE="/tmp/pre"
 PK="[$salesOrder][$subid]"
 URL="http://spmgt.my.comp.ltd/SPOT/provisioning/api/provisioningnotifications/$PK"
 CURL="curl  --globoff -i -v -A \"perl\" -X PUT"
-
+CT="Content-Type:application/json"
 cat > $KSPRE << EOF_PRE
 %pre
-$CURL  -d "{\"status\":\"<b>Anaconda is starting to deploy $ISO image... <br />The process may take 10 minutes...  </b>\",\"progress\":\"80\", \"configuredip\":\"$ipaddress\"}" $URL
+$CURL  -d "{\"status\":\"<b>Anaconda is starting to deploy $ISO image... <br />The process may take 10 minutes...  </b>\",\"progress\":\"80\", \"configuredip\":\"$ipaddress\"}" $URL -H $CT
 
 cat > /tmp/rpm_watcher.sh << "EOF_RPM"
 ANACONDADIR="/tmp"
@@ -157,7 +157,7 @@ cat > $KSPOST << EOF_POST
 %post --nochroot
 kill -9 \$PID
 sleep 15
-$CURL  -d "{\"status\":\"<b>The iso image $ISO has been installed.<br />Client is rebooting with custom initial configuration</b>\",\"progress\":\"100\", \"configuredip\":\"$ipaddress\"}" $URL
+$CURL  -d "{\"status\":\"<b>The iso image $ISO has been installed.<br />Client is rebooting with custom initial configuration</b>\",\"progress\":\"100\", \"configuredip\":\"$ipaddress\"}" $URL -H $CT
 %end
 
 
@@ -401,7 +401,7 @@ $req->content($json);
 my $resp = $lwp->request($req);
 print $req->as_string;
 print Dumper $resp;
-' "$URI" "$PK" "$hostname" "$INSTALLATIONIP" "$ipaddress" "$image" "$status" "$PROGRESS" "$RAM_tot" "$MANUFACTURER" "$NUMPROC" "$DISKCOUNT" "$NETCOUNT" "$MODEL" "$MACHSERIAL" "$OS"
+' "$URI" "$PK" "$hostname" "$INSTALLATIONIP" "$ipaddress" "$ISO" "$status" "$PROGRESS" "$RAM_tot" "$MANUFACTURER" "$NUMPROC" "$DISKCOUNT" "$NETCOUNT" "$MODEL" "$MACHSERIAL" "$OS"
 
 
 }
