@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #title          :releaseDownload
-#description    :prepare a full puppet server deployment
+#description    :download customer release in C:\Mycompany\Delivery
 #author         :ACS
 #date           :20160909
 #version        :1.1
@@ -10,8 +10,8 @@
 #@(#)------------------------------------------------------
 #@(#) General Information
 #@(#)   Name      : releaseDownload
-#@(#)   Purpose   : Aim to completely install a dedicated puppet server
-#@(#)   Version  ( : 1.1
+#@(#)   Purpose   : Aim to completely download customer release in C:\Mycompany\Delivery
+#@(#)   Version   : 1.1
 #@(#)   Author    : A. Cristalli
 #@(#)------------------------------------------------------
 #@(#) Usage
@@ -31,7 +31,7 @@ typeset SAMBACMD="$(which smbclient ) "
 typeset APISERVER="spmgt.my.comp.ltd"
 typeset SHARENAME='c$' 
 typeset MESSAGE="<div class='alert alert-danger blinking'>Executing $PROGNAME ..... Be patience</div>"
-
+PID=$$
 ## Parse prog name to find an ID if executed from SPOTDB
 
 ID=$(echo $PROGNAME | awk -F "_" '{print $3}')
@@ -149,7 +149,7 @@ log() {
         }
         
         Error() {
-            Help $0; exit $1
+            Help $0; exit $1; kill $PID
         }
         [ $# -eq 0 ] && Error 255
         while [ $# -gt 0 ] ; do
@@ -180,12 +180,13 @@ log() {
         fi
         hostNAME=$(nmblookup -A $MGT | grep '<00> -     '  | awk '{print $1}' | head -1)
   	hostNAME=${hostNAME,,}
+        MESSAGE="<div class='alert alert-danger blinking'>$hostNAME : Executing $PROGNAME ..... Be patience</div>" && log INFO "Starting the core of the script"
     }
     
     validateRelease () {
         ls $RELEASE 2>/dev/null
         if [ $? -ne 0 ]; then
-            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&   log ERROR "The release $RELESE doesn't exist!" && exit 2
+            MESSAGE="<div class='alert alert-success'>$hostNAME : $PROGNAME terminated</div>" &&   log ERROR "The release $RELESE doesn't exist!" && exit 2 && kill $PID
         fi
     }
      logCommand () {
@@ -212,7 +213,7 @@ log() {
 SMBCLIENTCOMMANDS
 
         if [ $? -ne 0 ]; then
-            MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>"  && echo "Cannot copy the release..." && exit 2
+            MESSAGE="<div class='alert alert-success'>$hostNAME : $PROGNAME terminated</div>"  && echo "Cannot copy the release..." && exit 2 && kill $PID
         fi
     }
  
@@ -222,12 +223,12 @@ SMBCLIENTCOMMANDS
   check=$(nmap -PN -p 139 $MGT | grep 'open')
   if [[ $check ==  "" ]]; then
      MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>"
-    log ERROR "Cannot connect to $MGT, samba port not open or host not reachable. Please, check  ip address, routing, or samba service available on remote host. " && exit 299
+    log ERROR "Cannot connect to $MGT, samba port not open or host not reachable. Please, check  ip address, routing, or samba service available on remote host. " && exit 299 && kill $PID
   fi
 
         # the following steps are self explanatory....
         validateRelease
 	 log WARN "Copying $RELEASE in //$MGT/$DELIVERY .... May takes some time."
         copyRelease 
-       MESSAGE="<div class='alert alert-success'>$PROGNAME terminated</div>" &&  log INFO "End of script execution"
+       MESSAGE="<div class='alert alert-success'>$hostNAME : $PROGNAME terminated</div>" &&  log INFO "End of script execution"
       exit 0
