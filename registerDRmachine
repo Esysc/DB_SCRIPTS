@@ -89,17 +89,51 @@ use feature qw(switch);
 use HTTP::Cookies;
 use HTTP::Request;
 use LWP;
-my $REST = shift;
 my $uri = shift;
+my $PK = shift;
+my $hostname = shift;
+my $INSTALLATIONIP = shift;
+my $ipaddress = shift;
+my $image = shift;
+my $status = shift;
+my $PROGRESS = shift;
+my $RAM_tot = shift;
+my $MANUFACTURER = shift;
+my $NUMPROC = shift;
+my $DISKCOUNT = shift;
+my $NETCOUNT = shift;
+my $MODEL = shift;
+my $MACHSERIAL = shift;
+my $OS = shift;
+my %REST = (
+"notifid" => $PK,
+"hostname" => $hostname,
+"installationip" => $INSTALLATIONIP,
+"configuredip" => $ipaddress,
+"status" => "<b>$status</b>",
+"progress" => $PROGRESS,
+"image" => $image,
+"firmware" => $MANUFACTURER,
+"ram" => $RAM_tot,
+"cpu" =>  $NUMPROC,
+"diskscount" => $DISKCOUNT,
+"netintcount" => $NETCOUNT,
+"model" => $MODEL,
+"serial" => $MACHSERIAL,
+"os" => $OS
+);
+
+my $json  = encode_json \%REST;
 my $lwp = LWP::UserAgent->new(
                         timeout               => 10,
 );
 my $req = HTTP::Request->new( "PUT", "$uri" );
-$req->content($REST);
+$req->content($json);
 my $resp = $lwp->request($req);
 print $req->as_string;
-#print Dumper $resp;
-' "$REST" "$URI"
+print Dumper $resp;
+' "$URI" "$PK" "$hostname" "$INSTALLATIONIP" "$ipaddress" "$ISO" "$status" "$PROGRESS" "$RAM_tot" "$MANUFACTURER" "$NUMPROC" "$DISKCOUNT" "$NETCOUNT" "$MODEL" "$MACHSERIAL" "$OS"
+
 }
 createMonitorRecord () {
  status="$1"
